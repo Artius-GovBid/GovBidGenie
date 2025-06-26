@@ -423,45 +423,61 @@ The architecture will be composed of three main parts:
 
 ## Epic 5: AI Self-Learning & Follow-up Automation
 
-**Goal:** To build the mechanism for the AI to learn from past conversations and implement the automated logic for handling no-shows and rescheduling requests.
+**Goal:** To make the system smarter over time by creating a structured learning process and to robustly handle common scheduling issues like no-shows and rescheduling requests.
 
-### Story 5.1: Implement Self-Learning Mechanism
-
-**As a** system,
-**I want** to implement a self-learning mechanism for the conversational AI
-**so that** it can adapt and improve its outreach and conversation strategies over time based on past interactions.
-
-#### Acceptance Criteria
-
-1.  The conversational AI must have a self-learning mechanism that analyzes conversation data stored in Supabase.
-2.  The AI must be able to learn from past interactions and refine its strategies based on the outcomes of those interactions.
-3.  The AI must be able to generate dynamic, context-aware, and non-generic responses based on the learned strategies.
-4.  The AI must be able to handle no-shows and reschedule requests automatically.
-
-### Story 5.2: Implement Automated Follow-up Logic
-
-**As a** system,
-**I want** to implement an automated follow-up logic for the conversational AI
-**so that** I can handle no-shows and reschedule requests efficiently.
-
-#### Acceptance Criteria
-
-1.  The conversational AI must be able to detect when a business is unresponsive or does not show up for a meeting.
-2.  The AI must be able to generate a follow-up message based on the learned strategies.
-3.  The follow-up message must be sent to the business's page via the `facebook_service`.
-4.  The system must handle the rescheduling of the appointment through the conversational AI.
-
-### Story 5.3: Ensure Funnel State is Reflected in Azure DevOps
+### Story 5.1: Analyze and Tag Conversation Outcomes
 
 **As a** system administrator,
-**I want** every change in a lead's status to be reflected in our Azure DevOps board
-**so that** I have a real-time view of the entire engagement funnel.
+**I want** a background job that uses an LLM to analyze completed conversations and tag them with structured outcomes
+**so that** we can create a dataset of which conversational strategies are effective and which are not.
 
 #### Acceptance Criteria
 
-1.  The Power Automate flows connecting Supabase to Azure DevOps must be configured to monitor the `status` column in the `leads` table.
-2.  When a lead's status changes to `'Prospected'`, `'Engaged'`, or `'Messaged'`, the corresponding Power Automate flow must trigger.
-3.  The flow must successfully move the correct Work Item on the Azure DevOps Kanban board to the column that matches the new status.
-4.  A brief, automated comment (e.g., "Status updated to: Engaged") should be added to the Work Item's discussion history for traceability.
+1.  A new background job or service will be created that processes conversations marked as 'complete'.
+2.  The job will retrieve the full conversation history from the `conversation_logs` table.
+3.  It will send the transcript to an LLM with a prompt designed to classify the outcome.
+4.  The LLM will return a structured tag (e.g., `successful_booking`, `objection_cost`, `not_interested`, `ghosted`).
+5.  This outcome tag will be stored in a way that is associated with the lead and conversation.
+
+### Story 5.2: Create a 'Learnings' Table to Store Insights
+
+**As a** system analyst,
+**I want** to store the tagged conversation outcomes in a dedicated `learnings` table
+**so that** I can query and analyze our conversational performance over time.
+
+#### Acceptance Criteria
+
+1.  A new table named `learnings` will be created in the Supabase database.
+2.  The table must include columns for `id`, `conversation_id` (Foreign Key), `outcome_tag`, `summary` (text), and `created_at`.
+3.  The job from Story 5.1 must populate this table with the results of its analysis.
+4.  The `summary` field should contain a brief, AI-generated summary of the conversation for quick reference.
+
+### Story 5.3: Implement Automated No-Show Detection and Follow-up
+
+**As a** system,
+**I want** to detect when a scheduled appointment has passed without the user attending
+**so that** I can automatically trigger a follow-up message to re-engage the lead.
+
+#### Acceptance Criteria
+
+1.  A scheduled job must run periodically to check for appointments in the `appointments` table whose `end_time` is in the past.
+2.  The system must have a way to verify if the meeting actually occurred (for the MVP, we can assume if the status is still `tentative` or `confirmed` and not `completed`, it was a no-show).
+3.  If a no-show is detected, the `conversation_service` must be triggered.
+4.  The conversational AI will generate and send a specific, empathetic follow-up message to the lead via Facebook DM.
+5.  The lead's status in the `leads` table should be updated to something like `no_show_follow_up`.
+
+### Story 5.4: Handle User-Initiated Rescheduling Requests
+
+**As a** business owner,
+**I want** to be able to tell the AI that I need to reschedule my appointment
+**so that** I can easily find a new time that works for me without manual intervention.
+
+#### Acceptance Criteria
+
+1.  The `conversation_service` must be updated with a new intent detection for "reschedule".
+2.  When this intent is detected, the system should cancel the existing calendar event.
+3.  The system must re-initiate the same logic from Epic 3, using the `calendar_service` to find new available slots.
+4.  The AI will then present the new options to the user and manage the re-booking conversation flow.
+5.  The appointment record in the database must be updated with the new time upon confirmation.
 
  
