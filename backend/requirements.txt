@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+python-dotenv
+supabase
+psycopg2-binary
+requests
+schedule
+# For connecting to Supabase via SQLAlchemy
+# Make sure your SUPABASE_DB_URL is in the format:
+# postgresql://user:password@host:port/database
