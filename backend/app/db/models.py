@@ -1,4 +1,4 @@
-from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, ForeignKey
+from sqlalchemy import create_engine, Column, Integer, String, DateTime, Text, ForeignKey, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -23,6 +23,7 @@ class Lead(Base):
     facebook_page_url = Column(String)
     status = Column(String, default='Identified')
     azure_devops_work_item_id = Column(Integer, nullable=True) # To link to Azure DevOps
+    analyzed_for_learning = Column(Boolean, default=False) # For Epic 5
     created_at = Column(DateTime, default=datetime.utcnow)
     last_updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

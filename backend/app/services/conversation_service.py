@@ -35,6 +35,38 @@ class ConversationService:
         # response = self.openai_client.completions.create(...)
         # mock_response = response.choices[0].text.strip()
         
+        # Check for reschedule intent
+        if "reschedule" in " ".join([log.message for log in conversation_history]):
+             return "reschedule_intent_detected"
+
         mock_response = "That's great to hear! Would you be available for a brief 15-minute call next week to discuss the details?"
         
         return mock_response
+
+    def analyze_conversation(self, conversation_history: list[ConversationLog]) -> dict:
+        """
+        Analyzes a completed conversation and returns a structured outcome.
+        This is a placeholder for an LLM call.
+        """
+        print("--- Analyzing conversation for insights (mock) ---")
+        
+        full_transcript = "\n".join([f"{log.sender}: {log.message}" for log in conversation_history])
+        
+        # In a real scenario, an LLM would analyze the transcript.
+        # Here, we'll just use some simple mock logic.
+        outcome_tag = "unknown"
+        summary = "No summary available."
+
+        if "call next week" in full_transcript:
+            outcome_tag = "successful_booking_offer"
+            summary = "The AI successfully guided the conversation towards booking a meeting."
+        elif "not interested" in full_transcript:
+            outcome_tag = "not_interested"
+            summary = "The lead explicitly stated they were not interested."
+        
+        print(f"Outcome determined: {outcome_tag}")
+
+        return {
+            "outcome_tag": outcome_tag,
+            "summary": summary,
+        }

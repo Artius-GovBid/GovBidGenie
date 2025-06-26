@@ -216,6 +216,21 @@ def handle_conversation_message(lead_id: int, incoming_message: IncomingMessage,
     conversation_history = db.query(ConversationLog).filter(ConversationLog.lead_id == lead.id).order_by(ConversationLog.timestamp).all()
     ai_response_text = convo_service.generate_response(conversation_history)
 
+    # --- Reschedule Logic ---
+    if ai_response_text == "reschedule_intent_detected":
+        # In a real app, you might have a more sophisticated state machine.
+        # Here, we'll just log that we detected it and let the frontend/user
+        # call the dedicated reschedule endpoint.
+        log_reschedule_intent = ConversationLog(
+            lead_id=lead.id,
+            sender="System",
+            message="Reschedule intent detected. User should be prompted to start the reschedule flow."
+        )
+        db.add(log_reschedule_intent)
+        db.commit()
+        return {"message": "Reschedule intent detected. Call the reschedule endpoint to proceed."}
+    # --- End Reschedule Logic ---
+
     # 3. "Send" the AI's response
     facebook_service = FacebookService()
     recipient_id = lead.business_name # Using name as placeholder ID
@@ -231,6 +246,37 @@ def handle_conversation_message(lead_id: int, incoming_message: IncomingMessage,
     db.commit()
 
     return {"message": "Response sent and conversation logged."}
+
+@app.post("/reschedule-appointment/{lead_id}", status_code=200)
+def reschedule_appointment(lead_id: int, db: Session = Depends(get_db)):
+    """
+    Cancels the current appointment and sets the lead status back to
+    'Appointment Offered' to restart the booking process.
+    """
+    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+        
+    # Find the current active appointment for the lead
+    current_appointment = db.query(Appointment).filter(
+        Appointment.lead_id == lead.id,
+        Appointment.status.in_(['tentative', 'confirmed'])
+    ).first()
+
+    if not current_appointment:
+        raise HTTPException(status_code=404, detail="No active appointment found to reschedule.")
+
+    # Cancel the calendar event
+    calendar_service = CalendarService()
+    calendar_service.cancel_appointment(current_appointment.external_event_id)
+
+    # Update our internal records
+    current_appointment.status = "cancelled_rescheduled"
+    lead.status = "Appointment Offered" # Reset status to re-trigger offering new slots
+    lead.last_updated_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": "Appointment cancelled. Lead is ready to be offered new slots."}
 
 class AppointmentRequest(BaseModel):
     start_time: str # ISO 8601 format

@@ -46,3 +46,16 @@ class CalendarService:
         
         print(f"Successfully created mock appointment with ID: {mock_event_id}")
         return {"event_id": mock_event_id, "status": "tentative"}
+
+    def cancel_appointment(self, event_id: str) -> bool:
+        """
+        Cancels an appointment using its external event ID.
+        This is a placeholder implementation.
+        """
+        print(f"--- Cancelling appointment {event_id} (mock) ---")
+
+        # In a real implementation, you would use the Microsoft Graph API
+        # to delete the event.
+        
+        print("Successfully cancelled mock appointment.")
+        return True
