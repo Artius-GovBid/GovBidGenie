@@ -8,11 +8,14 @@ Base = declarative_base()
 class Opportunity(Base):
     __tablename__ = 'opportunities'
     id = Column(Integer, primary_key=True)
-    title = Column(String)
-    agency = Column(String)
-    posted_date = Column(DateTime)
-    url = Column(String, unique=True)
+    sam_gov_id = Column(String(255), nullable=False, unique=True)
+    title = Column(Text, nullable=False)
+    description = Column(Text)
+    agency = Column(String(255))
+    location_text = Column(String(255))
+    url = Column(String(2048))
     created_at = Column(DateTime, default=datetime.utcnow)
+    posted_date = Column(DateTime)
 
     leads = relationship("Lead", back_populates="opportunity")
 

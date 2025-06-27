@@ -24,17 +24,20 @@ const DEVOPS_PAT = Deno.env.get("DEVOPS_PAT");
 // Main function to handle incoming database webhooks
 serve(async (req) => {
   const payload = await req.json();
-  const record = payload.record;
 
   try {
     if (payload.type === "INSERT") {
-      // Logic for new leads
-      console.log(`New lead created: ${record.business_name} (ID: ${record.id})`);
-      await handleNewLead(record);
+      console.log(`Handling INSERT for: ${payload.record.id}`);
+      await handleNewLead(payload.record);
     } else if (payload.type === "UPDATE") {
-      // Logic for lead status updates
-      console.log(`Lead updated: ${record.id}`);
-      await handleUpdatedLead(record);
+      console.log(`Handling UPDATE for: ${payload.record.id}`);
+      // Only process the update if the status has actually changed
+      if (payload.record.status !== payload.old_record.status) {
+        console.log(`Status changed from ${payload.old_record.status} to ${payload.record.status}. Processing...`);
+        await handleUpdatedLead(payload.record);
+      } else {
+        console.log("Status unchanged. Ignoring update.");
+      }
     }
 
     return new Response("Webhook processed successfully", { status: 200 });
@@ -46,10 +49,11 @@ serve(async (req) => {
 
 // Function to handle creating a new work item in Azure DevOps
 async function handleNewLead(lead: any) {
-  const url = `${DEVOPS_ORG_URL}/${DEVOPS_PROJECT_NAME}/_apis/wit/workitems/$User%20Story?api-version=7.1-preview.3`;
+  const url = `${DEVOPS_ORG_URL}/${DEVOPS_PROJECT_NAME}/_apis/wit/workitems/$Issue?api-version=7.1-preview.3`;
   const body = [
     { "op": "add", "path": "/fields/System.Title", "value": lead.business_name },
-    { "op": "add", "path": "/fields/System.Description", "value": `Initial lead created for opportunity ID: ${lead.opportunity_id}` }
+    { "op": "add", "path": "/fields/System.Description", "value": `Initial lead created for opportunity ID: ${lead.opportunity_id}` },
+    { "op": "add", "path": "/fields/System.State", "value": "Identified" }
   ];
 
   const response = await fetch(url, {
@@ -89,10 +93,32 @@ async function handleUpdatedLead(lead: any) {
     return;
   }
 
-  const url = `${DEVOPS_ORG_URL}/_apis/wit/workitems/${lead.azure_devops_work_item_id}?api-version=7.1-preview.3`;
+  // Map Supabase status to Azure DevOps state
+  const stateMap: { [key: string]: string } = {
+    "IDENTIFIED": "Identified",
+    "PROSPECTED": "Prospected",
+    "ENGAGED": "Engaged",
+    "MESSAGED": "Messaged",
+    "APPOINTMENT_OFFERED": "Appointment Offered",
+    "APPOINTMENT_SET": "Appointment Set",
+    "CONFIRMED": "Confirmed"
+    // The "Done" state exists in DevOps but is not mapped here
+    // as there is no corresponding status in our system.
+  };
+
+  const devopsState = stateMap[lead.status];
+
+  if (!devopsState) {
+    console.warn(`No Azure DevOps state mapping found for status: ${lead.status}. Skipping update.`);
+    return;
+  }
+
+  const url = `${DEVOPS_ORG_URL}/${DEVOPS_PROJECT_NAME}/_apis/wit/workitems/${lead.azure_devops_work_item_id}?api-version=7.1-preview.3`;
   const body = [
-    { "op": "add", "path": "/fields/System.State", "value": lead.status }
+    { "op": "add", "path": "/fields/System.State", "value": devopsState }
   ];
+
+  console.log(`Updating work item ${lead.azure_devops_work_item_id} with body:`, JSON.stringify(body, null, 2));
 
   const response = await fetch(url, {
     method: 'PATCH',
@@ -104,10 +130,12 @@ async function handleUpdatedLead(lead: any) {
   });
 
   if (!response.ok) {
-    throw new Error(`Azure DevOps API Error: ${await response.text()}`);
+    const errorText = await response.text();
+    console.error(`Azure DevOps API Error (${response.status}): ${errorText}`);
+    throw new Error(`Azure DevOps API Error: ${errorText}`);
   }
 
-  console.log(`Updated work item ${lead.azure_devops_work_item_id} to state ${lead.status}`);
+  console.log(`Updated work item ${lead.azure_devops_work_item_id} to state ${devopsState}`);
 }
 
 /* To invoke locally:
