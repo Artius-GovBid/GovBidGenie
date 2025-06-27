@@ -332,4 +332,3 @@ Testing will be comprehensive, including unit tests for individual functions, in
 3. The system must re-initiate the same logic from Epic 3, using the `calendar_service` to find new available slots.
 4. The AI will then present the new options to the user and manage the re-booking conversation flow.
 5. The appointment record in the database must be updated with the new time upon confirmation.
-
