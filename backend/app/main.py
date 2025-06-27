@@ -44,7 +44,7 @@ def run_opportunity_pipeline(db: Session = Depends(get_db)):
     for opp_data in opportunities_data:
         # Check if opportunity already exists
         exists = db.query(Opportunity).filter(Opportunity.url == opp_data["url"]).first()
-        if not exists:
+        if exists is None:
             new_opp = Opportunity(
                 title=opp_data["title"],
                 agency=opp_data["agency"],
@@ -80,30 +80,35 @@ def prospect_lead(lead_id: int, db: Session = Depends(get_db)):
     matching Facebook page for it, updating its status to 'Prospected'.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
     
     if lead.status != "Identified":
         raise HTTPException(status_code=400, detail=f"Lead status is '{lead.status}', not 'Identified'.")
 
     # Extract keywords from the opportunity title
+    if lead.opportunity is None:
+        raise HTTPException(status_code=400, detail="Lead has no associated opportunity.")
     keywords = lead.opportunity.title.split()
 
     facebook_service = FacebookService()
     pages = facebook_service.search_business_pages(keywords)
 
     if not pages:
-        lead.status = "Prospecting Failed"
+        db.query(Lead).filter(Lead.id == lead_id).update({"status": "Prospecting Failed"})
         db.commit()
         raise HTTPException(status_code=404, detail="No matching Facebook pages found.")
 
     # For this example, we'll just take the first result
     found_page = pages[0]
     
-    lead.business_name = found_page["name"]
-    lead.facebook_page_url = found_page["link"]
-    lead.status = "Prospected"
-    lead.last_updated_at = datetime.utcnow()
+    update_data = {
+        "business_name": found_page["name"],
+        "facebook_page_url": found_page["link"],
+        "status": "Prospected",
+        "last_updated_at": datetime.utcnow()
+    }
+    db.query(Lead).filter(Lead.id == lead_id).update(update_data)
     
     db.commit()
     db.refresh(lead)
@@ -125,25 +130,27 @@ def engage_lead(lead_id: int, db: Session = Depends(get_db)):
     Updates the lead's status to 'Engaged'.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
 
     if lead.status != "Prospected":
         raise HTTPException(status_code=400, detail=f"Lead status is '{lead.status}', not 'Prospected'.")
 
-    if not lead.facebook_page_url:
+    if lead.facebook_page_url is None:
         raise HTTPException(status_code=400, detail="Lead has no Facebook page URL to engage with.")
 
     facebook_service = FacebookService()
-    success = facebook_service.perform_engagement_sequence(lead.facebook_page_url)
+    success = facebook_service.perform_engagement_sequence(str(lead.facebook_page_url))
 
     if not success:
-        lead.status = "Engagement Failed"
+        db.query(Lead).filter(Lead.id == lead_id).update({"status": "Engagement Failed"})
         db.commit()
         raise HTTPException(status_code=500, detail="Failed to perform engagement sequence. Check logs.")
 
-    lead.status = "Engaged"
-    lead.last_updated_at = datetime.utcnow()
+    db.query(Lead).filter(Lead.id == lead_id).update({
+        "status": "Engaged",
+        "last_updated_at": datetime.utcnow()
+    })
     db.commit()
 
     return {"message": f"Successfully engaged with lead {lead.id}."}
@@ -155,21 +162,23 @@ def initiate_conversation(lead_id: int, db: Session = Depends(get_db)):
     logs it, and updates the lead's status to 'Messaged'.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
 
     if lead.status != "Engaged":
         raise HTTPException(status_code=400, detail=f"Lead status is '{lead.status}', not 'Engaged'.")
 
     # 1. Generate the initial message
-    convo_service = ConversationService()
-    message_text = convo_service.generate_initial_message(lead)
+    conversation_service = ConversationService()
+    message_text = conversation_service.generate_initial_message(lead)
 
     # 2. "Send" the message via FacebookService
     facebook_service = FacebookService()
     # In a real app, the recipient_id would be the Page-Scoped ID (PSID), not the URL.
     # For this mock, we'll use the business name as a stand-in for the ID.
-    recipient_id = lead.business_name 
+    if lead.business_name is None:
+        raise HTTPException(status_code=400, detail="Lead has no business name.")
+    recipient_id = str(lead.business_name)
     success = facebook_service.send_direct_message(recipient_id, message_text)
 
     if not success:
@@ -184,8 +193,10 @@ def initiate_conversation(lead_id: int, db: Session = Depends(get_db)):
     db.add(new_log)
     
     # 4. Update lead status
-    lead.status = "Messaged"
-    lead.last_updated_at = datetime.utcnow()
+    db.query(Lead).filter(Lead.id == lead_id).update({
+        "status": "Messaged",
+        "last_updated_at": datetime.utcnow()
+    })
     
     db.commit()
 
@@ -198,7 +209,7 @@ def handle_conversation_message(lead_id: int, incoming_message: IncomingMessage,
     and logging the entire exchange.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
 
     # 1. Log the incoming message from the business
@@ -212,9 +223,12 @@ def handle_conversation_message(lead_id: int, incoming_message: IncomingMessage,
     db.refresh(user_log)
 
     # 2. Generate a response
-    convo_service = ConversationService()
-    conversation_history = db.query(ConversationLog).filter(ConversationLog.lead_id == lead.id).order_by(ConversationLog.timestamp).all()
-    ai_response_text = convo_service.generate_response(conversation_history)
+    conversation_service = ConversationService()
+    conversation_history_orm = db.query(ConversationLog).filter(ConversationLog.lead_id == lead.id).order_by(ConversationLog.timestamp).all()
+    conversation_history = [
+        {"sender": str(log.sender), "message": str(log.message)} for log in conversation_history_orm
+    ]
+    ai_response_text = conversation_service.generate_response(conversation_history)
 
     # --- Reschedule Logic ---
     if ai_response_text == "reschedule_intent_detected":
@@ -233,7 +247,9 @@ def handle_conversation_message(lead_id: int, incoming_message: IncomingMessage,
 
     # 3. "Send" the AI's response
     facebook_service = FacebookService()
-    recipient_id = lead.business_name # Using name as placeholder ID
+    if lead.business_name is None:
+        raise HTTPException(status_code=400, detail="Lead has no business name.")
+    recipient_id = str(lead.business_name) # Using name as placeholder ID
     facebook_service.send_direct_message(recipient_id, ai_response_text)
     
     # 4. Log the AI's outgoing message
@@ -254,7 +270,7 @@ def reschedule_appointment(lead_id: int, db: Session = Depends(get_db)):
     'Appointment Offered' to restart the booking process.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
         
     # Find the current active appointment for the lead
@@ -263,17 +279,21 @@ def reschedule_appointment(lead_id: int, db: Session = Depends(get_db)):
         Appointment.status.in_(['tentative', 'confirmed'])
     ).first()
 
-    if not current_appointment:
+    if current_appointment is None:
         raise HTTPException(status_code=404, detail="No active appointment found to reschedule.")
 
     # Cancel the calendar event
     calendar_service = CalendarService()
-    calendar_service.cancel_appointment(current_appointment.external_event_id)
+    if current_appointment.external_event_id is None:
+        raise HTTPException(status_code=400, detail="Appointment has no external event ID to cancel.")
+    calendar_service.cancel_appointment(str(current_appointment.external_event_id))
 
     # Update our internal records
-    current_appointment.status = "cancelled_rescheduled"
-    lead.status = "Appointment Offered" # Reset status to re-trigger offering new slots
-    lead.last_updated_at = datetime.utcnow()
+    db.query(Appointment).filter(Appointment.id == current_appointment.id).update({"status": "cancelled_rescheduled"})
+    db.query(Lead).filter(Lead.id == lead.id).update({
+        "status": "Appointment Offered", # Reset status to re-trigger offering new slots
+        "last_updated_at": datetime.utcnow()
+    })
     db.commit()
 
     return {"message": "Appointment cancelled. Lead is ready to be offered new slots."}
@@ -288,14 +308,16 @@ def offer_appointment(lead_id: int, db: Session = Depends(get_db)):
     Gets available appointment slots and updates lead status to 'Appointment Offered'.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
         
     calendar_service = CalendarService()
     available_slots = calendar_service.get_availability()
 
-    lead.status = "Appointment Offered"
-    lead.last_updated_at = datetime.utcnow()
+    db.query(Lead).filter(Lead.id == lead.id).update({
+        "status": "Appointment Offered",
+        "last_updated_at": datetime.utcnow()
+    })
     db.commit()
 
     # In a real app, the AI would present these slots to the user.
@@ -306,22 +328,24 @@ def offer_appointment(lead_id: int, db: Session = Depends(get_db)):
     }
 
 @app.post("/book-appointment/{lead_id}", status_code=201)
-def book_appointment(lead_id: int, appt_request: AppointmentRequest, db: Session = Depends(get_db)):
+def book_appointment(lead_id: int, appointment_request: AppointmentRequest, db: Session = Depends(get_db)):
     """
     Books an appointment for the lead at a specified time.
     """
     lead = db.query(Lead).filter(Lead.id == lead_id).first()
-    if not lead:
+    if lead is None:
         raise HTTPException(status_code=404, detail="Lead not found")
 
     calendar_service = CalendarService()
     # In a real app, you'd need the lead's email. Using a placeholder for now.
-    lead_email = f"{lead.business_name.replace(' ', '').lower()}@example.com"
+    if lead.business_name is None:
+        raise HTTPException(status_code=400, detail="Lead has no business name.")
+    lead_email = f"{str(lead.business_name).replace(' ', '').lower()}@example.com"
     title = f"Intro Call: GovBidGenie & {lead.business_name}"
 
     created_event = calendar_service.create_appointment(
-        start_time=appt_request.start_time,
-        end_time=appt_request.end_time,
+        start_time=appointment_request.start_time,
+        end_time=appointment_request.end_time,
         title=title,
         lead_email=lead_email
     )
@@ -329,16 +353,18 @@ def book_appointment(lead_id: int, appt_request: AppointmentRequest, db: Session
     # Log the appointment in our database
     new_appointment = Appointment(
         lead_id=lead.id,
-        start_time=datetime.fromisoformat(appt_request.start_time.replace("Z", "+00:00")),
-        end_time=datetime.fromisoformat(appt_request.end_time.replace("Z", "+00:00")),
+        start_time=datetime.fromisoformat(appointment_request.start_time.replace("Z", "+00:00")),
+        end_time=datetime.fromisoformat(appointment_request.end_time.replace("Z", "+00:00")),
         title=title,
         external_event_id=created_event["event_id"],
         status=created_event["status"]
     )
     db.add(new_appointment)
     
-    lead.status = "Appointment Set"
-    lead.last_updated_at = datetime.utcnow()
+    db.query(Lead).filter(Lead.id == lead_id).update({
+        "status": "Appointment Set",
+        "last_updated_at": datetime.utcnow()
+    })
     db.commit()
 
     return {"message": "Appointment created successfully.", "appointment_details": created_event}

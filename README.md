@@ -30,20 +30,22 @@ The platform is built with a decoupled frontend/backend architecture:
 - Node.js & npm (for frontend development)
 - Access to a Supabase project
 - API keys for:
-    - OpenAI
-    - Facebook Graph API
-    - Microsoft Graph API
+  - OpenAI
+  - Facebook Graph API
+  - Microsoft Graph API
 - An Azure DevOps project and a Power Automate license.
 
 ### Installation
 
-1.  **Clone the repository:**
+1. **Clone the repository:**
+
     ```sh
     git clone https://github.com/Artius-GovBid/GovBidGenie.git
     cd GovBidGenie
     ```
 
-2.  **Backend Setup:**
+2. **Backend Setup:**
+
     ```sh
     cd backend
     python -m venv venv
@@ -53,7 +55,8 @@ The platform is built with a decoupled frontend/backend architecture:
     # Add your API keys and secrets to the .env file
     ```
 
-3.  **Frontend Setup (TBD):**
+3. **Frontend Setup (TBD):**
+
     ```sh
     cd ../frontend
     npm install
@@ -62,15 +65,17 @@ The platform is built with a decoupled frontend/backend architecture:
 
 ### Running the Application
 
--   **To run the backend:**
-    ```sh
-    cd backend
-    uvicorn app.main:app --reload
-    ```
+**To run the backend:**
 
--   **To run the scheduled jobs:**
-    The application uses a scheduler to periodically fetch data from SAM.gov. This will be run as part of the main backend process.
+```sh
+cd backend
+uvicorn app.main:app --reload
+```
+
+**To run the scheduled jobs:**
+
+The application uses a scheduler to periodically fetch data from SAM.gov. This will be run as part of the main backend process.
 
 ## Project Status
 
-This project is currently in the architectural design phase. The backend and frontend structures have been defined, and development is beginning. 
+This project is currently in the architectural design phase. The backend and frontend structures have been defined, and development is beginning.

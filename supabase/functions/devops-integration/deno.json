@@ -1,3 +1,14 @@
 {
-  "imports": {}
+  "imports": {
+    "std/": "https://deno.land/std@0.224.0/",
+    "@supabase/supabase-js": "npm:@supabase/supabase-js@2.44.4"
+  },
+  "compilerOptions": {
+    "lib": ["deno.ns", "dom"]
+  },
+  "words": [
+    "supabase",
+    "workitems",
+    "XVCJ"
+  ]
 }
