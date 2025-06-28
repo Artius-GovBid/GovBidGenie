@@ -1,9 +1,14 @@
+import logging
 from sqlalchemy.orm import Session
 from app.db.models import Opportunity, Lead
 from app.services.facebook_service import FacebookService
 from app.services.naics_service import NAICSService
 from app.services.psc_service import PSCService
 from datetime import datetime
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 class LeadService:
     def __init__(self, db_session: Session):
@@ -57,44 +62,54 @@ class LeadService:
         """
         Processes new opportunities that haven't been converted into leads yet.
         """
-        print("Lead Service: Starting to process new opportunities...")
+        logger.info("Starting to process new opportunities...")
         
         unprocessed_opportunities = self.db.query(Opportunity).outerjoin(Lead).filter(Lead.id == None).all()
 
         if not unprocessed_opportunities:
-            print("Lead Service: No new opportunities to process.")
+            logger.info("No new opportunities to process.")
             return
 
-        print(f"Lead Service: Found {len(unprocessed_opportunities)} new opportunities to process.")
+        logger.info(f"Found {len(unprocessed_opportunities)} new opportunities to process.")
         
         for opportunity in unprocessed_opportunities:
-            print(f"Lead Service: Processing opportunity '{opportunity.title}'")
+            logger.info(f"Processing opportunity ID {opportunity.id}: '{opportunity.title}'")
 
             search_term = None
             
-            # Attempt 1: Use the NAICS code description
-            naics_code = str(opportunity.naics_code) if opportunity.naics_code is not None else None
-            if naics_code:
-                print(f"Lead Service: Trying NAICS code {naics_code}...")
-                search_term = self.naics_service.get_description_for_code(naics_code)
+            # Attempt 1: Use the opportunity title
+            if opportunity.title:
+                logger.info(f"Attempting to find search term with Opportunity Title: '{opportunity.title}'")
+                search_term = opportunity.title # Use the title directly as the search term
 
-            # Attempt 2: Fallback to PSC code description if NAICS fails
+            # Attempt 2: Fallback to NAICS code description
+            if not search_term:
+                naics_code = str(opportunity.naics_code) if opportunity.naics_code is not None else None
+                if naics_code:
+                    logger.info(f"Title search failed. Attempting with NAICS code {naics_code}...")
+                    search_term = self.naics_service.get_description_for_code(naics_code)
+                    if search_term:
+                        logger.info(f"Found NAICS description: '{search_term}'")
+
+            # Attempt 3: Fallback to PSC code description
             if not search_term:
                 psc_code = str(opportunity.psc_code) if opportunity.psc_code is not None else None
                 if psc_code:
-                    print(f"Lead Service: NAICS failed. Trying PSC code {psc_code}...")
+                    logger.info(f"NAICS lookup failed. Attempting with PSC code {psc_code}...")
                     search_term = self.psc_service.get_description_for_code(psc_code)
+                    if search_term:
+                        logger.info(f"Found PSC description: '{search_term}'")
 
             if not search_term:
-                print(f"Lead Service: Could not determine a search term for opportunity {opportunity.id}. Skipping.")
+                logger.warning(f"Could not determine a search term for opportunity {opportunity.id}. Skipping.")
                 continue
 
             # Find the Facebook Page ID using the determined search term
-            print(f"Lead Service: Searching Facebook for pages matching '{search_term}'...")
+            logger.info(f"Searching Facebook for pages matching '{search_term}'...")
             target_page_id = self.facebook_service.find_page_by_name(search_term)
 
             if not target_page_id:
-                print(f"Lead Service: Could not find a Facebook page for '{search_term}'. Skipping.")
+                logger.warning(f"Could not find a Facebook page for '{search_term}' for opportunity {opportunity.id}. Skipping.")
                 continue
 
             # Create a Lead record to track this outreach
@@ -106,6 +121,6 @@ class LeadService:
             )
             self.db.add(new_lead)
             self.db.commit()
-            print(f"Lead Service: Successfully created a new lead for opportunity {opportunity.id} targeting page {target_page_id}.")
+            logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {target_page_id}.")
 
-        print("Lead Service: Finished processing opportunities.") 
+        logger.info("Finished processing opportunities.") 
