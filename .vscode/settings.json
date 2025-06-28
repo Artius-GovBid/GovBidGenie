@@ -1,0 +1,32 @@
+{
+    "cSpell.words": [
+        "autoflush",
+        "autocommit",
+        "dotenv",
+        "fastapi",
+        "greenlet",
+        "gunicorn",
+        "hpack",
+        "httptools",
+        "httpx",
+        "hyperframe",
+        "iniconfig",
+        "jiter",
+        "monorepo",
+        "postgrest",
+        "psycopg",
+        "pydantic",
+        "pyjwt",
+        "pyright",
+        "pyyaml",
+        "sqlalchemy",
+        "starlette",
+        "strenum",
+        "supabase",
+        "supafunc",
+        "uvicorn",
+        "uvloop",
+        "watchfiles",
+        "websockets"
+    ]
+} 
