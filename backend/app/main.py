@@ -8,6 +8,7 @@ from app.db.models import Base, Opportunity, Lead
 from app.services.sam_service import SAMService
 from app.services.devops_service import DevOpsService
 from app.services.facebook_service import FacebookService
+from app.jobs.scheduler import scheduler
 
 # --- Environment Variables ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -37,7 +38,17 @@ facebook_service = FacebookService()
 @app.on_event("startup")
 async def startup_event():
     # This is where you might initialize other services or connections
-    pass
+    try:
+        scheduler.start()
+        print("Scheduler has been started.")
+    except Exception as e:
+        print(f"Failed to start scheduler: {e}")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown()
+    print("Scheduler has been shut down.")
 
 
 @app.post("/webhook/facebook")
@@ -133,7 +144,7 @@ def create_lead_from_opportunity(opportunity_data: Dict[str, Any]):
                 "opportunity_id": opportunity.id,
                 "business_name": new_lead.business_name # Will be null initially
             })
-            new_lead.azure_devops_work_item_id = work_item_id
+            new_lead.azure_devops_work_item_id = int(work_item_id)
             db.commit()
             db.refresh(new_lead)
         except Exception as e:

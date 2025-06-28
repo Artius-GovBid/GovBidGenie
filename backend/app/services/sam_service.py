@@ -24,15 +24,15 @@ class SAMService:
         if params is None:
             params = {}
 
-        # The SAM.gov API requires an api_key for many queries, but we'll make a basic one without it first.
-        # If an API key is provided, add it to the params.
+        # The API key must be sent as a URL parameter.
         if self.api_key:
             params['api_key'] = self.api_key
         
-        headers = {'Content-Type': 'application/json'}
+        headers = {'Accept': 'application/json'}
 
         try:
-            response = requests.post(self.base_url, json=params, headers=headers)
+            # Use a GET request with all parameters in the URL
+            response = requests.get(self.base_url, params=params, headers=headers)
             response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
 
             data = response.json()
