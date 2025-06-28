@@ -1,6 +1,7 @@
 import os
 import requests
 from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
 
 class SAMService:
     """
@@ -62,6 +63,65 @@ class SAMService:
             }
             parsed_list.append(parsed_opp)
         return parsed_list
+
+    def fetch_and_store_opportunities(self, db: "Session"):
+        """
+        Fetches opportunities from the SAM.gov API and stores them in the database.
+        Prevents duplicates by checking the sam_gov_id.
+        """
+        from app.db.models import Opportunity
+        from datetime import datetime, timedelta
+
+        print("SAM Service: Starting to fetch and store opportunities...")
+        
+        today = datetime.now()
+        yesterday = today - timedelta(days=1)
+        posted_from = yesterday.strftime('%m/%d/%Y')
+        posted_to = today.strftime('%m/%d/%Y')
+
+        params = {
+            'limit': 100,
+            'postedFrom': posted_from,
+            'postedTo': posted_to
+        }
+
+        opportunities_data = self.fetch_opportunities(params=params)
+        if not opportunities_data:
+            print("SAM Service: No new opportunities found in the last 24 hours.")
+            return
+
+        new_opportunities_count = 0
+        for opp_data in opportunities_data:
+            sam_id = opp_data.get('sam_gov_id')
+            if not sam_id:
+                continue
+
+            exists = db.query(Opportunity).filter(Opportunity.sam_gov_id == sam_id).first()
+            if not exists:
+                posted_date_obj = None
+                if opp_data.get('posted_date'):
+                    try:
+                        posted_date_obj = datetime.strptime(opp_data['posted_date'], '%Y-%m-%d')
+                    except (ValueError, TypeError):
+                        continue
+                
+                new_opp = Opportunity(
+                    sam_gov_id=sam_id,
+                    title=opp_data.get('title'),
+                    url=opp_data.get('url'),
+                    agency=opp_data.get('agency'),
+                    posted_date=posted_date_obj,
+                    naics_code=opp_data.get('naicsCode'),
+                    psc_code=opp_data.get('classificationCode')
+                )
+                db.add(new_opp)
+                new_opportunities_count += 1
+        
+        if new_opportunities_count > 0:
+            db.commit()
+            print(f"SAM Service: Successfully stored {new_opportunities_count} new opportunities.")
+        else:
+            print("SAM Service: No new opportunities to store.")
 
 # Example usage (for testing or direct script execution):
 if __name__ == '__main__':

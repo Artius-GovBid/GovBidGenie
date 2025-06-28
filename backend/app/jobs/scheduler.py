@@ -17,84 +17,18 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def fetch_and_store_opportunities():
     """
-    Fetches opportunities from the SAM.gov API and stores them in the database.
-    Prevents duplicates by checking the sam_gov_id.
+    Fetches opportunities from the SAM.gov API and stores them in the database
+    by calling the SAMService.
     """
-    print("Scheduler: Starting to fetch opportunities from SAM.gov...")
-    sam_service = SAMService()
+    print("Scheduler: Starting SAM.gov fetch job...")
     db = SessionLocal()
     try:
-        # The public API requires a date range. We'll fetch from the last 24 hours.
-        today = datetime.now()
-        yesterday = today - timedelta(days=1)
-        
-        # Format dates as MM/DD/YYYY
-        posted_from = yesterday.strftime('%m/%d/%Y')
-        posted_to = today.strftime('%m/%d/%Y')
-
-        params = {
-            'limit': 100, # Fetch more to increase chance of finding new ones
-            'postedFrom': posted_from,
-            'postedTo': posted_to
-        }
-
-        opportunities_data = sam_service.fetch_opportunities(params=params)
-        if not opportunities_data:
-            print("Scheduler: No opportunities found in the last 24 hours.")
-            return
-
-        new_opportunities = []
-        for opp_data in opportunities_data:
-            sam_id = opp_data.get('noticeId')
-            title = opp_data.get('title')
-
-            # Ensure we have the essential data before proceeding
-            if not (sam_id and title):
-                continue
-
-            # Check if opportunity already exists
-            exists = db.query(Opportunity).filter(Opportunity.sam_gov_id == sam_id).first()
-            if not exists:
-                
-                # Safely parse the posted_date
-                posted_date_str = opp_data.get('postedDate')
-                posted_date_obj = None
-                if posted_date_str:
-                    try:
-                        # The API returns a simple date 'YYYY-MM-DD'
-                        posted_date_obj = datetime.strptime(posted_date_str, '%Y-%m-%d')
-                    except ValueError:
-                        print(f"Scheduler: Could not parse date '{posted_date_str}' for noticeId {sam_id}. Skipping.")
-                        continue
-                
-                if not posted_date_obj:
-                    continue # Skip if date is missing or malformed
-
-                new_opportunities.append(
-                    Opportunity(
-                        sam_gov_id=sam_id,
-                        title=title,
-                        url=opp_data.get('uiLink'),
-                        agency=opp_data.get('fullParentPathName'), # Use a more reliable agency field
-                        posted_date=posted_date_obj,
-                        naics_code=opp_data.get('naicsCode'),
-                        psc_code=opp_data.get('classificationCode')
-                    )
-                )
-
-        if new_opportunities:
-            print(f"Scheduler: Found {len(new_opportunities)} new opportunities to store.")
-            db.add_all(new_opportunities)
-            db.commit()
-            print(f"Scheduler: Successfully stored {len(new_opportunities)} new opportunities.")
-        else:
-            print("Scheduler: No new opportunities to store.")
-
+        sam_service = SAMService()
+        sam_service.fetch_and_store_opportunities(db)
     except Exception as e:
-        print(f"Scheduler: An error occurred: {e}")
+        print(f"Scheduler: An error occurred during SAM.gov fetch: {e}")
         db.rollback()
     finally:
-        print("Scheduler: Job finished.")
         db.close()
 
 def process_opportunities_into_leads():
