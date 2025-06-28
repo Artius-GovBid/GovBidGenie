@@ -5,6 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
 from app.services.sam_service import SAMService
+from app.services.lead_service import LeadService
 from app.db.models import Opportunity
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -75,7 +76,9 @@ def fetch_and_store_opportunities():
                         title=title,
                         url=opp_data.get('uiLink'),
                         agency=opp_data.get('fullParentPathName'), # Use a more reliable agency field
-                        posted_date=posted_date_obj
+                        posted_date=posted_date_obj,
+                        naics_code=opp_data.get('naicsCode'),
+                        psc_code=opp_data.get('classificationCode')
                     )
                 )
 
@@ -94,8 +97,25 @@ def fetch_and_store_opportunities():
         print("Scheduler: Job finished.")
         db.close()
 
+def process_opportunities_into_leads():
+    """
+    Initializes the LeadService and processes new opportunities.
+    """
+    print("Scheduler: Starting lead processing job...")
+    db = SessionLocal()
+    try:
+        lead_service = LeadService(db)
+        lead_service.process_new_opportunities()
+    except Exception as e:
+        print(f"Scheduler: An error occurred during lead processing: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
 scheduler = BackgroundScheduler()
-# Schedule the job to run every 24 hours
+# Schedule the opportunity fetching job to run every 24 hours
 scheduler.add_job(fetch_and_store_opportunities, 'interval', hours=24, id="sam_fetch_job")
+# Schedule the lead processing job to run every hour
+scheduler.add_job(process_opportunities_into_leads, 'interval', hours=1, id="lead_processing_job")
 # For testing, run every minute. For production, change to hours=24
 # scheduler.add_job(fetch_and_store_opportunities, 'interval', minutes=1, id="sam_fetch_job")

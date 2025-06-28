@@ -78,3 +78,36 @@ class FacebookService:
             response.raise_for_status()
             
         return response.json()
+
+    def find_page_by_name(self, page_name: str) -> Optional[str]:
+        """
+        Searches for a Facebook Page by its name and returns the ID of the top result.
+
+        Args:
+            page_name: The name of the page to search for.
+
+        Returns:
+            The Page ID as a string if a page is found, otherwise None.
+        """
+        endpoint = "https://graph.facebook.com/v20.0/pages/search"
+        params = {
+            'q': page_name,
+            'fields': 'id,name',
+            'limit': 1, # We only want the most likely result
+            'access_token': self.access_token
+        }
+
+        response = requests.get(endpoint, params=params)
+
+        if not response.ok:
+            print(f"ERROR: Failed to search for page '{page_name}'. Status: {response.status_code}, Body: {response.text}")
+            return None
+        
+        data = response.json().get('data', [])
+        if data:
+            top_result = data[0]
+            print(f"Found page '{top_result['name']}' with ID {top_result['id']} for search term '{page_name}'")
+            return top_result['id']
+        else:
+            print(f"No Facebook Page found for search term '{page_name}'")
+            return None

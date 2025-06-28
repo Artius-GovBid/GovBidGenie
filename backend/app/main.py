@@ -1,13 +1,17 @@
 import os
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from typing import List, Dict, Any
+from starlette.middleware.cors import CORSMiddleware
 
 from app.db.models import Base, Opportunity, Lead
 from app.services.sam_service import SAMService
 from app.services.devops_service import DevOpsService
 from app.services.facebook_service import FacebookService
+from app.api.v1.router import api_router
+from app.core.config import settings
+from app.db.client import db_client
 from app.jobs.scheduler import scheduler
 
 # --- Environment Variables ---
@@ -27,7 +31,13 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # Create tables if they don't exist
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI()
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+)
+
+# CORS Middleware
+# ... (rest of CORS middleware configuration)
 
 # --- Services ---
 sam_service = SAMService()
@@ -36,19 +46,24 @@ facebook_service = FacebookService()
 
 
 @app.on_event("startup")
-async def startup_event():
-    # This is where you might initialize other services or connections
-    try:
+def startup_event():
+    db_client.connect()
+    # No need to check for Supabase, direct DB connection now
+    print("--- Database connection established. ---")
+    
+    # Start the background scheduler
+    if not scheduler.running:
         scheduler.start()
-        print("Scheduler has been started.")
-    except Exception as e:
-        print(f"Failed to start scheduler: {e}")
+        print("--- Background scheduler started. ---")
 
 
 @app.on_event("shutdown")
-async def shutdown_event():
-    scheduler.shutdown()
-    print("Scheduler has been shut down.")
+def shutdown_event():
+    if scheduler.running:
+        scheduler.shutdown()
+        print("--- Background scheduler shut down. ---")
+    
+    db_client.disconnect()
 
 
 @app.post("/webhook/facebook")
@@ -106,59 +121,8 @@ async def facebook_webhook_get(request: Request):
         raise HTTPException(status_code=403, detail="Verification token mismatch.")
 
 
-@app.post("/api/v1/leads", status_code=201)
-def create_lead_from_opportunity(opportunity_data: Dict[str, Any]):
-    db = SessionLocal()
-    try:
-        sam_gov_id = opportunity_data.get("sam_gov_id")
-        if not sam_gov_id:
-            raise HTTPException(status_code=400, detail="sam_gov_id is required")
-
-        # 1. Find or create the Opportunity
-        opportunity = db.query(Opportunity).filter(Opportunity.sam_gov_id == sam_gov_id).first()
-        if not opportunity:
-            opportunity = Opportunity(
-                sam_gov_id=sam_gov_id,
-                title=opportunity_data.get("title", "N/A"),
-                url=opportunity_data.get("url"),
-                agency=opportunity_data.get("agency"),
-                posted_date=opportunity_data.get("posted_date")
-            )
-            db.add(opportunity)
-            db.commit()
-            db.refresh(opportunity)
-
-        # 2. Create the Lead
-        new_lead = Lead(
-            opportunity_id=opportunity.id,
-            source="SAM.gov",
-            status="IDENTIFIED"
-        )
-        db.add(new_lead)
-        db.commit()
-        db.refresh(new_lead)
-
-        # 3. Create the Azure DevOps Work Item
-        try:
-            work_item_id = devops_service.create_work_item({
-                "opportunity_id": opportunity.id,
-                "business_name": new_lead.business_name # Will be null initially
-            })
-            new_lead.azure_devops_work_item_id = int(work_item_id)
-            db.commit()
-            db.refresh(new_lead)
-        except Exception as e:
-            # Log the error, but don't fail the entire request
-            # In a real app, you'd have a more robust retry/queueing mechanism
-            print(f"ERROR: Failed to create ADO work item for lead {new_lead.id}. Error: {e}")
-
-
-        return {"lead_id": new_lead.id, "opportunity_id": opportunity.id, "azure_devops_work_item_id": new_lead.azure_devops_work_item_id}
-
-    finally:
-        db.close()
-
-
 @app.get("/")
 def read_root():
     return {"message": "GovBidGenie Backend is running"}
+
+app.include_router(api_router, prefix=settings.API_V1_STR)

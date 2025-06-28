@@ -1,0 +1,111 @@
+from sqlalchemy.orm import Session
+from app.db.models import Opportunity, Lead
+from app.services.facebook_service import FacebookService
+from app.services.naics_service import NAICSService
+from app.services.psc_service import PSCService
+from datetime import datetime
+
+class LeadService:
+    def __init__(self, db_session: Session):
+        self.db = db_session
+        self.facebook_service = FacebookService()
+        self.naics_service = NAICSService()
+        self.psc_service = PSCService()
+
+    def get_lead_by_sam_id(self, sam_gov_id: str) -> Lead | None:
+        """
+        Retrieves a lead by its SAM.gov ID.
+        """
+        return self.db.query(Lead).join(Opportunity).filter(Opportunity.sam_gov_id == sam_gov_id).first()
+
+    def create_lead(self, sam_gov_id: str, title: str, url: str, agency: str, posted_date: datetime) -> Lead:
+        """
+        Creates an opportunity and a corresponding lead.
+        """
+        # First, create the opportunity
+        opportunity = Opportunity(
+            sam_gov_id=sam_gov_id,
+            title=title,
+            url=url,
+            agency=agency,
+            posted_date=posted_date
+        )
+        self.db.add(opportunity)
+        self.db.commit()
+        self.db.refresh(opportunity)
+
+        # Now, create the lead
+        new_lead = Lead(
+            opportunity_id=opportunity.id,
+            status="IDENTIFIED"
+        )
+        self.db.add(new_lead)
+        self.db.commit()
+        self.db.refresh(new_lead)
+        return new_lead
+
+    def update_lead_ado_id(self, lead_id: int, ado_id: int):
+        """
+        Updates a lead with the Azure DevOps work item ID.
+        """
+        lead = self.db.query(Lead).filter(Lead.id == lead_id).first()
+        if lead:
+            lead.azure_devops_work_item_id = ado_id
+            self.db.commit()
+
+    def process_new_opportunities(self):
+        """
+        Processes new opportunities that haven't been converted into leads yet.
+        """
+        print("Lead Service: Starting to process new opportunities...")
+        
+        unprocessed_opportunities = self.db.query(Opportunity).outerjoin(Lead).filter(Lead.id == None).all()
+
+        if not unprocessed_opportunities:
+            print("Lead Service: No new opportunities to process.")
+            return
+
+        print(f"Lead Service: Found {len(unprocessed_opportunities)} new opportunities to process.")
+        
+        for opportunity in unprocessed_opportunities:
+            print(f"Lead Service: Processing opportunity '{opportunity.title}'")
+
+            search_term = None
+            
+            # Attempt 1: Use the NAICS code description
+            naics_code = str(opportunity.naics_code) if opportunity.naics_code is not None else None
+            if naics_code:
+                print(f"Lead Service: Trying NAICS code {naics_code}...")
+                search_term = self.naics_service.get_description_for_code(naics_code)
+
+            # Attempt 2: Fallback to PSC code description if NAICS fails
+            if not search_term:
+                psc_code = str(opportunity.psc_code) if opportunity.psc_code is not None else None
+                if psc_code:
+                    print(f"Lead Service: NAICS failed. Trying PSC code {psc_code}...")
+                    search_term = self.psc_service.get_description_for_code(psc_code)
+
+            if not search_term:
+                print(f"Lead Service: Could not determine a search term for opportunity {opportunity.id}. Skipping.")
+                continue
+
+            # Find the Facebook Page ID using the determined search term
+            print(f"Lead Service: Searching Facebook for pages matching '{search_term}'...")
+            target_page_id = self.facebook_service.find_page_by_name(search_term)
+
+            if not target_page_id:
+                print(f"Lead Service: Could not find a Facebook page for '{search_term}'. Skipping.")
+                continue
+
+            # Create a Lead record to track this outreach
+            new_lead = Lead(
+                opportunity_id=opportunity.id,
+                status="Discovered",
+                facebook_page_url=target_page_id,
+                business_name=search_term
+            )
+            self.db.add(new_lead)
+            self.db.commit()
+            print(f"Lead Service: Successfully created a new lead for opportunity {opportunity.id} targeting page {target_page_id}.")
+
+        print("Lead Service: Finished processing opportunities.") 

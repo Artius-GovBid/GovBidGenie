@@ -1,3 +1,5 @@
+import os
+import sys
 from logging.config import fileConfig
 
 from sqlalchemy import engine_from_config, create_engine
@@ -18,6 +20,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # from myapp import mymodel
 # target_metadata = mymodel.Base.metadata
+sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), '..')))
 from app.db.models import Base
 import os
 from dotenv import load_dotenv
@@ -63,13 +66,35 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = create_engine(os.environ["SUPABASE_DB_URL"])
+    configuration = config.get_section(config.config_ini_section)
+    if configuration:
+        configuration['sqlalchemy.url'] = os.environ['DATABASE_URL']
+    connectable = engine_from_config(
+            configuration,
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
 
     with connectable.connect() as connection:
         context.configure(
             connection=connection, target_metadata=target_metadata
         )
 
+            with context.begin_transaction():
+                context.run_migrations()
+    else:
+        # Fallback for when the alembic section is not in the ini file
+        db_url = os.environ.get("DATABASE_URL")
+        if db_url is None:
+            raise ValueError("DATABASE_URL must be set in environment or alembic.ini")
+        
+        connectable = create_engine(db_url)
+
+        with connectable.connect() as connection:
+            context.configure(
+                connection=connection,
+                target_metadata=target_metadata
+            )
         with context.begin_transaction():
             context.run_migrations()
 

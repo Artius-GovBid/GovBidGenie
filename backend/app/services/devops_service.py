@@ -24,7 +24,8 @@ class DevOpsService:
             "MESSAGED": "Messaged",
             "APPOINTMENT OFFERED": "Appointment Offered",
             "APPOINTMENT SET": "Appointment Set",
-            "CONFIRMED": "Confirmed"
+            "CONFIRMED": "Confirmed",
+            "DONE": "Done"
         }
 
     def _get_headers(self) -> Dict[str, str]:
@@ -35,19 +36,23 @@ class DevOpsService:
         """Returns the headers for adding a comment."""
         return {'Content-Type': 'application/json'}
 
-    def create_work_item(self, lead_data: Dict[str, Any]) -> int:
+    def create_work_item(self, title: str, opportunity_url: str, agency: str, source: str) -> Any:
         """
         Creates a new work item (Issue) in Azure DevOps.
-        Returns the ID of the new work item.
+        Returns the created work item object.
         """
         url = f"{self.org_url}/{self.project_name}/_apis/wit/workitems/$Issue?api-version=7.1-preview.3"
         
-        title = lead_data.get('business_name') or f"Lead from Opportunity {lead_data.get('opportunity_id')}"
-        
+        description = (
+            f"<b>Source:</b> {source}<br>"
+            f"<b>Agency:</b> {agency}<br>"
+            f"<b>Opportunity Link:</b> <a href='{opportunity_url}'>{opportunity_url}</a>"
+        )
+
         body = [
             {"op": "add", "path": "/fields/System.Title", "value": title},
-            {"op": "add", "path": "/fields/System.Description", "value": f"Initial lead created for opportunity ID: {lead_data.get('opportunity_id')}"},
-            {"op": "add", "path": "/fields/System.State", "value": "To Do"},
+            {"op": "add", "path": "/fields/System.Description", "value": description},
+            {"op": "add", "path": "/fields/System.State", "value": "Identified"},
         ]
 
         response = requests.post(url, json=body, headers=self._get_headers(), auth=self.auth)
@@ -56,9 +61,7 @@ class DevOpsService:
             print(f"ERROR: Failed to create work item. Status: {response.status_code}, Body: {response.text}")
             response.raise_for_status()
 
-        work_item = response.json()
-        work_item_id = work_item['id']
-        return work_item_id
+        return response.json()
 
     def update_work_item_status(self, work_item_id: int, new_status: str):
         """

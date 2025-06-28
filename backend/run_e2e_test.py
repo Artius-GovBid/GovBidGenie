@@ -9,19 +9,23 @@ load_dotenv()
 
 BASE_URL = "http://127.0.0.1:8000"
 
-def check_server_health():
-    """Checks if the FastAPI server is running."""
-    try:
-        response = requests.get(BASE_URL)
-        if response.status_code == 200:
-            print("--- FastAPI server is running. ---")
-            return True
-        else:
-            print(f"--- Server returned status {response.status_code}. ---")
-            return False
-    except requests.ConnectionError:
-        print("--- FastAPI server is not running. ---")
-        return False
+def check_server_health(retries=5, delay=2):
+    """Checks if the FastAPI server is running with retries."""
+    for i in range(retries):
+        try:
+            response = requests.get(BASE_URL)
+            if response.status_code == 200:
+                print("--- FastAPI server is running. ---")
+                return True
+            else:
+                print(f"--- Server returned status {response.status_code}. Retrying... ---")
+        except requests.ConnectionError:
+            print(f"--- FastAPI server is not running. Retrying... ---")
+        
+        time.sleep(delay)
+
+    print("--- FastAPI server is not running after multiple retries. ---")
+    return False
 
 def run_test():
     """Runs the end-to-end test."""
