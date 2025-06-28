@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.orm import Session
-from app.db.client import get_db
+from app.db.models import Lead
+from app.db.client import SessionLocal, get_db
 from app.services.lead_service import LeadService
 from app.services.devops_service import DevOpsService
 from pydantic import BaseModel, HttpUrl
@@ -15,15 +16,51 @@ class LeadCreateSchema(BaseModel):
     agency: str
     posted_date: datetime
 
-@router.post("/", status_code=201)
-def create_lead(lead_in: LeadCreateSchema, db: Session = Depends(get_db)):
+def create_devops_work_item_task(lead_id: int):
     """
-    Create a new lead from a SAM.gov opportunity.
+    Background task to create a DevOps work item and update the lead.
+    It creates its own database session.
+    """
+    db = SessionLocal()
+    try:
+        lead_service = LeadService(db)
+        devops_service = DevOpsService()
+
+        lead = db.query(Lead).filter(Lead.id == lead_id).one_or_none()
+        if not lead or not lead.opportunity:
+            print(f"BACKGROUND_TASK_ERROR: Could not find lead or opportunity for lead_id: {lead_id}")
+            return
+
+        opportunity = lead.opportunity
+        
+        work_item = devops_service.create_work_item(
+            title=f"New Lead: {opportunity.title}",
+            opportunity_url=opportunity.url,
+            agency=opportunity.agency,
+            source="SAM.gov"
+        )
+        
+        ado_id = work_item['id']
+        lead_service.update_lead_ado_id(lead.id, ado_id)
+        print(f"BACKGROUND_TASK_SUCCESS: Created ADO work item {ado_id} for lead {lead.id}")
+    
+    except Exception as e:
+        print(f"BACKGROUND_TASK_ERROR: Failed for lead {lead.id}: {e}")
+    finally:
+        db.close()
+
+@router.post("/", status_code=202)
+def create_lead(
+    lead_in: LeadCreateSchema, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new lead from a SAM.gov opportunity and schedule a background
+    task to create the corresponding Azure DevOps work item.
     """
     lead_service = LeadService(db)
-    devops_service = DevOpsService()
 
-    # Check if a lead for this opportunity already exists
     existing_lead = lead_service.get_lead_by_sam_id(lead_in.sam_gov_id)
     if existing_lead:
         raise HTTPException(
@@ -31,7 +68,6 @@ def create_lead(lead_in: LeadCreateSchema, db: Session = Depends(get_db)):
             detail=f"A lead for SAM.gov ID '{lead_in.sam_gov_id}' already exists."
         )
 
-    # 1. Create the lead in the local database
     new_lead = lead_service.create_lead(
         sam_gov_id=lead_in.sam_gov_id,
         title=lead_in.title,
@@ -40,22 +76,9 @@ def create_lead(lead_in: LeadCreateSchema, db: Session = Depends(get_db)):
         posted_date=lead_in.posted_date
     )
 
-    # 2. Create a work item in Azure DevOps
-    # We need to get the opportunity to get the title, url, and agency
-    opportunity = new_lead.opportunity
-    work_item = devops_service.create_work_item(
-        title=f"New Lead: {opportunity.title}",
-        opportunity_url=opportunity.url,
-        agency=opportunity.agency,
-        source="SAM.gov"
-    )
-    
-    # 3. Update the lead with the DevOps work item ID
-    ado_id = work_item['id']
-    lead_service.update_lead_ado_id(new_lead.id, ado_id)
+    background_tasks.add_task(create_devops_work_item_task, new_lead.id)
 
     return {
-        "message": "Lead and Azure DevOps work item created successfully.",
+        "message": "Lead creation accepted. Azure DevOps work item will be created in the background.",
         "lead_id": new_lead.id,
-        "azure_devops_work_item_id": ado_id,
     }

@@ -51,12 +51,9 @@ def run_test():
         print(f"--- API Response: {response_data} ---")
         
         lead_id = response_data.get("lead_id")
-        ado_work_item_id = response_data.get("azure_devops_work_item_id")
 
-        if lead_id and ado_work_item_id:
-            print(f"--- SUCCESS: Lead created (ID: {lead_id}) and ADO work item created (ID: {ado_work_item_id}). ---")
-        elif lead_id:
-            print(f"--- WARNING: Lead created (ID: {lead_id}) but ADO work item creation failed. ---")
+        if lead_id:
+            print(f"--- SUCCESS: Lead creation accepted (ID: {lead_id}). ADO work item creation is in progress. ---")
         else:
             print(f"--- FAILURE: Could not create lead. ---")
 
