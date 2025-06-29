@@ -49,7 +49,6 @@ def process_opportunities_into_leads():
 scheduler = BackgroundScheduler()
 # Schedule the opportunity fetching job to run every 24 hours
 scheduler.add_job(fetch_and_store_opportunities, 'interval', hours=24, id="sam_fetch_job")
-# Schedule the lead processing job to run every hour
-scheduler.add_job(process_opportunities_into_leads, 'interval', hours=1, id="lead_processing_job")
-# For testing, run every minute. For production, change to hours=24
-# scheduler.add_job(fetch_and_store_opportunities, 'interval', minutes=1, id="sam_fetch_job")
+
+# Run the job immediately on startup
+scheduler.add_job(fetch_and_store_opportunities, 'date', run_date=datetime.now() + timedelta(seconds=5))

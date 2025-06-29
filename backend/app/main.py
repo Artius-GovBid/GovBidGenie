@@ -1,4 +1,5 @@
 import os
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request, Response, Depends
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, Session
@@ -13,6 +14,9 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.db.client import db_client
 from app.jobs.scheduler import scheduler
+
+# Load environment variables from .env file
+load_dotenv()
 
 # --- Environment Variables ---
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -64,61 +68,6 @@ def shutdown_event():
         print("--- Background scheduler shut down. ---")
     
     db_client.disconnect()
-
-
-@app.post("/webhook/facebook")
-async def facebook_webhook_post(request: Request):
-    """
-    Handles incoming webhook events from Facebook.
-    Specifically processes new comments on page posts.
-    """
-    data = await request.json()
-    print(f"Received Facebook webhook data: {data}")
-
-    # Ensure the event is for a page and contains feed changes
-    if data.get("object") == "page":
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                if change.get("field") == "feed" and change.get("value", {}).get("item") == "comment":
-                    try:
-                        comment_data = change["value"]
-                        comment_id = comment_data["comment_id"]
-                        
-                        # Here, you would add logic to verify this is a comment you want to reply to.
-                        # For now, we will reply to any comment as a demonstration.
-                        
-                        print(f"Processing new comment with ID: {comment_id}")
-                        reply_message = "Thank you for your comment! We've sent you a private message to follow up."
-
-                        facebook_service.send_private_reply(
-                            comment_id=comment_id,
-                            message=reply_message
-                        )
-                        print(f"Successfully sent private reply to comment {comment_id}")
-
-                    except Exception as e:
-                        print(f"ERROR: Failed to process comment or send reply. Error: {e}")
-                        # Return 200 to Facebook anyway, so it doesn't retry a failed event.
-                        pass
-
-    return Response(status_code=200)
-
-@app.get("/webhook/facebook")
-async def facebook_webhook_get(request: Request):
-    """
-    Handles Facebook's webhook verification request.
-    """
-    params = request.query_params
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
-
-    if mode == "subscribe" and token == FACEBOOK_VERIFY_TOKEN:
-        print("Facebook webhook verification successful!")
-        return Response(content=challenge, status_code=200)
-    else:
-        print("Facebook webhook verification failed.")
-        raise HTTPException(status_code=403, detail="Verification token mismatch.")
 
 
 @app.get("/")
