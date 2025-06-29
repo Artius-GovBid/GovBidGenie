@@ -1,6 +1,7 @@
 import os
 import requests
 from typing import Dict, Any, Optional
+from app.db.models import Opportunity
 
 class FacebookService:
     """
@@ -77,6 +78,55 @@ class FacebookService:
             print(f"ERROR: Failed to share and mention. Status: {response.status_code}, Body: {response.text}")
             response.raise_for_status()
             
+        return response.json()
+
+    def send_outreach_dm(self, recipient_id: str, commenter_name: str, opportunity: Opportunity) -> Dict[str, Any]:
+        """
+        Sends a personalized outreach DM to a specific user (recipient).
+        """
+        endpoint = f"https://graph.facebook.com/v20.0/me/messages"
+        
+        message = (
+            f"Hi {commenter_name}, thanks for your comment! "
+            f"I saw that you're in the business of {opportunity.agency} and thought you might be "
+            f"interested in a contract opportunity for '{opportunity.title}'. "
+            f"You can see the details here: {opportunity.url}. "
+            "Would you be open to a brief chat about it?"
+        )
+        
+        payload = {
+            "recipient": {"id": recipient_id},
+            "message": {"text": message},
+            "messaging_type": "MESSAGE_TAG",
+            "tag": "CONFIRMED_EVENT_UPDATE"
+        }
+        
+        params = {'access_token': self.access_token}
+
+        response = requests.post(endpoint, params=params, json=payload)
+        
+        if not response.ok:
+            print(f"ERROR: Failed to send DM. Status: {response.status_code}, Body: {response.text}")
+            response.raise_for_status()
+            
+        return response.json()
+
+    def get_page_info(self, page_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetches basic public information for a given Page ID.
+        """
+        endpoint = f"https://graph.facebook.com/v20.0/{page_id}"
+        params = {
+            'fields': 'id,name,category',
+            'access_token': self.access_token
+        }
+
+        response = requests.get(endpoint, params=params)
+
+        if not response.ok:
+            print(f"ERROR: Failed to get page info for ID '{page_id}'. Status: {response.status_code}, Body: {response.text}")
+            return None
+        
         return response.json()
 
     def find_page_by_name(self, page_name: str) -> Optional[str]:
