@@ -19,7 +19,7 @@ function App() {
       <div className="main-content">
         <Outlet />
       </div>
-    </div>
+      </div>
   );
 }
 

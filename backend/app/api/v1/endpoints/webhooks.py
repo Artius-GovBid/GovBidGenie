@@ -2,8 +2,12 @@ import os
 import json
 from fastapi import APIRouter, Request, HTTPException, Response
 from typing import Optional
+from fastapi import Depends
+from sqlalchemy.orm import Session
 
 from app.services.facebook_service import FacebookService
+from app.services.lead_service import LeadService
+from app.db.client import get_db
 
 router = APIRouter()
 
@@ -34,14 +38,40 @@ async def verify_facebook_webhook(request: Request):
 
 
 @router.post("/facebook", summary="Handle Facebook Webhook Events")
-async def handle_facebook_webhook(request: Request):
+async def handle_facebook_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Handles incoming events from the Facebook webhook, such as new comments.
     """
     data = await request.json()
-    print("Received Facebook Webhook Event:")
+    print("--- Received Facebook POST Event ---")
     print(json.dumps(data, indent=2))
 
-    # TODO: Add logic to parse the event and trigger the Genie Matching Engine
+    if data.get("object") == "page":
+        for entry in data.get("entry", []):
+            # Find the 'changes' field for feed events, or 'messaging' for message events
+            changes = entry.get("changes", [])
+            
+            for change in changes:
+                if change.get("field") == "feed" and change.get("value", {}).get("item") == "comment":
+                    try:
+                        comment_data = change["value"]
+                        # Ensure we are getting a new comment, not an edit
+                        if comment_data.get('verb') != 'add':
+                            continue
+
+                        commenter_id = comment_data.get("from", {}).get("id")
+                        comment_text = comment_data.get("message")
+                        
+                        if not commenter_id or not comment_text:
+                            print("Skipping event with missing data.")
+                            continue
+
+                        print(f"Processing new comment from user {commenter_id}")
+                        lead_service = LeadService(db)
+                        lead_service.find_and_create_lead_from_comment(commenter_id, comment_text)
+
+                    except Exception as e:
+                        print(f"ERROR: Failed to process comment. Error: {e}")
+                        pass
     
     return {"status": "success"} 

@@ -12,10 +12,9 @@ router = APIRouter()
 class OpportunitySchema(BaseModel):
     id: int
     title: str
-    agency: str
+    agency: Optional[str]
     url: Optional[str]
-    posted_date: datetime
-    source: Optional[str]
+    posted_date: Optional[datetime]
 
     class Config:
         from_attributes = True

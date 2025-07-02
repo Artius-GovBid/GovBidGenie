@@ -2,6 +2,8 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 from typing import Dict, Any
+from app.db.models import Lead, Opportunity
+from sqlalchemy.orm import Session
 
 class DevOpsService:
     """
@@ -107,3 +109,33 @@ class DevOpsService:
             response.raise_for_status()
             
         return response.json()
+
+    def create_work_item_from_lead(self, lead: Lead, db: Session):
+        """
+        Creates an Azure DevOps work item from a Lead object and updates the lead.
+        """
+        # Ensure the lead's opportunity is loaded
+        if not lead.opportunity:
+            lead = db.query(Lead).filter(Lead.id == lead.id).one()
+
+        title = f"New Lead: {lead.opportunity.title}"
+        
+        # Explicitly get the string value from the model attributes
+        opportunity_url = getattr(lead.opportunity, 'url', '') or ''
+        agency = getattr(lead.opportunity, 'agency', 'N/A') or 'N/A'
+        source = getattr(lead, 'source', 'Facebook') or 'Facebook'
+
+        new_ado_item = self.create_work_item(
+            title=title,
+            opportunity_url=opportunity_url,
+            agency=agency,
+            source=source
+        )
+        
+        new_ado_id = new_ado_item.get("id")
+        if new_ado_id:
+            lead.azure_devops_work_item_id = new_ado_id
+            db.commit()
+            print(f"Updated lead {lead.id} with ADO work item ID {new_ado_id}")
+
+        return new_ado_item

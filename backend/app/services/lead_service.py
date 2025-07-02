@@ -3,8 +3,9 @@ from sqlalchemy.orm import Session
 from app.db.models import Opportunity, Lead
 from app.services.facebook_service import FacebookService
 from app.services.naics_service import NAICSService
-from app.services.psc_service import PSCService
 from datetime import datetime
+
+print(f"--- LOADING LEAD SERVICE FROM: {__file__} ---")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -15,7 +16,6 @@ class LeadService:
         self.db = db_session
         self.facebook_service = FacebookService()
         self.naics_service = NAICSService()
-        self.psc_service = PSCService()
 
     def get_lead_by_sam_id(self, sam_gov_id: str) -> Lead | None:
         """
@@ -58,7 +58,7 @@ class LeadService:
             lead.azure_devops_work_item_id = ado_id
             self.db.commit()
 
-    def process_new_opportunities(self):
+    async def process_new_opportunities(self):
         """
         Processes new opportunities that haven't been converted into leads yet.
         """
@@ -75,52 +75,74 @@ class LeadService:
         for opportunity in unprocessed_opportunities:
             logger.info(f"Processing opportunity ID {opportunity.id}: '{opportunity.title}'")
 
-            search_term = None
+            search_terms = []
             
-            # Attempt 1: Use the opportunity title
+            # Attempt 1: Use the opportunity title if available
             if opportunity.title:
-                logger.info(f"Attempting to find search term with Opportunity Title: '{opportunity.title}'")
-                search_term = opportunity.title # Use the title directly as the search term
+                logger.info(f"Using opportunity title as a search term: '{opportunity.title}'")
+                search_terms.append(opportunity.title)
 
             # Attempt 2: Fallback to NAICS code description
-            if not search_term:
-                naics_code = str(opportunity.naics_code) if opportunity.naics_code is not None else None
-                if naics_code:
-                    logger.info(f"Title search failed. Attempting with NAICS code {naics_code}...")
-                    search_term = self.naics_service.get_description_for_code(naics_code)
-                    if search_term:
-                        logger.info(f"Found NAICS description: '{search_term}'")
+            naics_code = str(opportunity.naics_code) if opportunity.naics_code is not None else None
+            if naics_code:
+                try:
+                    logger.info(f"Attempting to find NAICS description for code {naics_code}...")
+                    # Assuming get_description is async, keep await. Add error handling.
+                    naics_description = await self.naics_service.get_description(naics_code)
+                    if naics_description:
+                        logger.info(f"Found NAICS description: '{naics_description}'")
+                        search_terms.append(naics_description)
+                except Exception as e:
+                    logger.error(f"Error fetching NAICS description for {naics_code}: {e}")
 
-            # Attempt 3: Fallback to PSC code description
-            if not search_term:
-                psc_code = str(opportunity.psc_code) if opportunity.psc_code is not None else None
-                if psc_code:
-                    logger.info(f"NAICS lookup failed. Attempting with PSC code {psc_code}...")
-                    search_term = self.psc_service.get_description_for_code(psc_code)
-                    if search_term:
-                        logger.info(f"Found PSC description: '{search_term}'")
-
-            if not search_term:
+            if not search_terms:
                 logger.warning(f"Could not determine a search term for opportunity {opportunity.id}. Skipping.")
                 continue
 
             # Find the Facebook Page ID using the determined search term
-            logger.info(f"Searching Facebook for pages matching '{search_term}'...")
-            target_page_id = self.facebook_service.find_page_by_name(search_term)
+            for term in search_terms:
+                page_id = None
+                try:
+                    logger.info(f"Searching Facebook for pages matching '{term}'...")
+                    # This is a synchronous call, so no 'await'.
+                    page_id = self.facebook_service.find_page_by_name(term)
+                except Exception as e:
+                    logger.error(f"Error searching for Facebook page with term '{term}': {e}")
+                    continue # Try next search term
 
-            if not target_page_id:
-                logger.warning(f"Could not find a Facebook page for '{search_term}' for opportunity {opportunity.id}. Skipping.")
-                continue
+                if not page_id:
+                    logger.warning(f"Could not find a Facebook page for '{term}' for opportunity {opportunity.id}.")
+                    continue
+                
+                # Now get the page info using the ID
+                page_info = self.facebook_service.get_page_info(page_id)
+                if not page_info or 'name' not in page_info:
+                    logger.warning(f"Could not get page info for page ID '{page_id}'.")
+                    continue
 
-            # Create a Lead record to track this outreach
-            new_lead = Lead(
-                opportunity_id=opportunity.id,
-                status="Discovered",
-                facebook_page_url=target_page_id,
-                business_name=search_term
-            )
-            self.db.add(new_lead)
-            self.db.commit()
-            logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {target_page_id}.")
+                # Check if a lead for this opportunity and business already exists
+                existing_lead = self.db.query(Lead).filter(
+                    Lead.opportunity_id == opportunity.id,
+                    Lead.business_name == page_info['name']
+                ).first()
 
-        logger.info("Finished processing opportunities.") 
+                if existing_lead:
+                    logger.info(f"Lead already exists for opportunity {opportunity.id} and business '{page_info['name']}'.")
+                    continue
+
+                # Create a Lead record to track this outreach
+                new_lead = Lead(
+                    opportunity_id=opportunity.id,
+                    status="Discovered",
+                    facebook_page_url=f"https://www.facebook.com/{page_id}", # Construct URL from ID
+                    business_name=page_info.get('name'),
+                    facebook_page_id=page_id
+                )
+                self.db.add(new_lead)
+                self.db.commit()
+                logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {page_info.get('name')}.")
+                # We found a lead for this opportunity, so we can move to the next one
+                break
+
+        logger.info("Finished processing opportunities.")
+ 

@@ -8,11 +8,11 @@ class FacebookService:
     Service to interact with the Facebook Graph API for managing a Page,
     including posting content and sending private replies to comments.
     """
-    def __init__(self):
-        self.page_id = os.environ.get("FACEBOOK_PAGE_ID")
-        self.access_token = os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN")
+    def __init__(self, page_id: Optional[str] = None, access_token: Optional[str] = None):
+        self.page_id = page_id or os.environ.get("FACEBOOK_PAGE_ID")
+        self.access_token = access_token or os.environ.get("FACEBOOK_ACCESS_TOKEN")
         if not self.page_id or not self.access_token:
-            raise ValueError("FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN environment variables must be set.")
+            raise ValueError("Facebook credentials not provided. Set FACEBOOK_PAGE_ID and FACEBOOK_ACCESS_TOKEN or pass them to the constructor.")
         self.base_url = f"https://graph.facebook.com/v20.0/{self.page_id}"
 
     def send_private_reply(self, comment_id: str, message: str) -> Dict[str, Any]:
@@ -76,6 +76,30 @@ class FacebookService:
 
         if not response.ok:
             print(f"ERROR: Failed to share and mention. Status: {response.status_code}, Body: {response.text}")
+            response.raise_for_status()
+            
+        return response.json()
+
+    def send_direct_message(self, recipient_page_id: str, message: str) -> Dict[str, Any]:
+        """
+        Sends a direct message to a Facebook Page's inbox.
+        This is used for initiating contact, not replying to comments.
+        """
+        endpoint = f"https://graph.facebook.com/v20.0/me/messages"
+        
+        payload = {
+            "recipient": {"id": recipient_page_id},
+            "message": {"text": message},
+            "messaging_type": "MESSAGE_TAG",
+            "tag": "CONFIRMED_EVENT_UPDATE" # A generic tag for business communication
+        }
+        
+        params = {'access_token': self.access_token}
+
+        response = requests.post(endpoint, params=params, json=payload)
+        
+        if not response.ok:
+            print(f"ERROR: Failed to send direct message. Status: {response.status_code}, Body: {response.text}")
             response.raise_for_status()
             
         return response.json()
