@@ -1,8 +1,9 @@
 import logging
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import sessionmaker
 from app.db.models import Opportunity, Lead
 from app.services.facebook_service import FacebookService
 from app.services.naics_service import NAICSService
+# from app.services.psc_service import PSCService # Temporarily remove
 from datetime import datetime
 
 print(f"--- LOADING LEAD SERVICE FROM: {__file__} ---")
@@ -12,51 +13,46 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 class LeadService:
-    def __init__(self, db_session: Session):
-        self.db = db_session
-        self.facebook_service = FacebookService()
-        self.naics_service = NAICSService()
+    def __init__(self, db_session_factory: sessionmaker, facebook_service: FacebookService, naics_service: NAICSService): #, psc_service: PSCService):
+        self.db_session_factory = db_session_factory
+        self.facebook_service = facebook_service
+        self.naics_service = naics_service
+        # self.psc_service = psc_service
 
-    def get_lead_by_sam_id(self, sam_gov_id: str) -> Lead | None:
+    def get_lead_by_sam_id(self, sam_gov_id: str):
         """
         Retrieves a lead by its SAM.gov ID.
         """
-        return self.db.query(Lead).join(Opportunity).filter(Opportunity.sam_gov_id == sam_gov_id).first()
+        with self.db_session_factory() as db:
+            return db.query(Lead).join(Opportunity).filter(Opportunity.sam_gov_id == sam_gov_id).first()
 
-    def create_lead(self, sam_gov_id: str, title: str, url: str, agency: str, posted_date: datetime) -> Lead:
+    def create_lead(self, opportunity_id: int, business_name: str, page_id: str):
         """
-        Creates an opportunity and a corresponding lead.
+        Creates a new Lead record.
         """
-        # First, create the opportunity
-        opportunity = Opportunity(
-            sam_gov_id=sam_gov_id,
-            title=title,
-            url=url,
-            agency=agency,
-            posted_date=posted_date
-        )
-        self.db.add(opportunity)
-        self.db.commit()
-        self.db.refresh(opportunity)
-
-        # Now, create the lead
-        new_lead = Lead(
-            opportunity_id=opportunity.id,
-            status="IDENTIFIED"
-        )
-        self.db.add(new_lead)
-        self.db.commit()
-        self.db.refresh(new_lead)
-        return new_lead
+        with self.db_session_factory() as db:
+            new_lead = Lead(
+                opportunity_id=opportunity_id,
+                status="Discovered",
+                facebook_page_url=f"https://www.facebook.com/{page_id}",
+                business_name=business_name,
+                facebook_page_id=page_id
+            )
+            db.add(new_lead)
+            db.commit()
+            db.refresh(new_lead)
+            logger.info(f"Successfully created lead for opportunity {opportunity_id} targeting page {business_name}.")
+            return new_lead
 
     def update_lead_ado_id(self, lead_id: int, ado_id: int):
         """
         Updates a lead with the Azure DevOps work item ID.
         """
-        lead = self.db.query(Lead).filter(Lead.id == lead_id).first()
-        if lead:
-            lead.azure_devops_work_item_id = ado_id
-            self.db.commit()
+        with self.db_session_factory() as db:
+            lead = db.query(Lead).filter(Lead.id == lead_id).first()
+            if lead:
+                lead.azure_devops_work_item_id = ado_id
+                db.commit()
 
     async def process_new_opportunities(self):
         """
@@ -64,85 +60,77 @@ class LeadService:
         """
         logger.info("Starting to process new opportunities...")
         
-        unprocessed_opportunities = self.db.query(Opportunity).outerjoin(Lead).filter(Lead.id == None).all()
+        with self.db_session_factory() as db:
+            unprocessed_opportunities = db.query(Opportunity).outerjoin(Lead).filter(Lead.id == None).all()
 
-        if not unprocessed_opportunities:
-            logger.info("No new opportunities to process.")
-            return
+            if not unprocessed_opportunities:
+                logger.info("No new opportunities to process.")
+                return
 
-        logger.info(f"Found {len(unprocessed_opportunities)} new opportunities to process.")
+            logger.info(f"Found {len(unprocessed_opportunities)} new opportunities to process.")
         
         for opportunity in unprocessed_opportunities:
             logger.info(f"Processing opportunity ID {opportunity.id}: '{opportunity.title}'")
 
             search_terms = []
             
-            # Attempt 1: Use the opportunity title if available
+            # Use title first
             if opportunity.title:
-                logger.info(f"Using opportunity title as a search term: '{opportunity.title}'")
                 search_terms.append(opportunity.title)
 
-            # Attempt 2: Fallback to NAICS code description
+            # Fallback to NAICS code description
             naics_code = str(opportunity.naics_code) if opportunity.naics_code is not None else None
             if naics_code:
                 try:
-                    logger.info(f"Attempting to find NAICS description for code {naics_code}...")
-                    # Assuming get_description is async, keep await. Add error handling.
                     naics_description = await self.naics_service.get_description(naics_code)
                     if naics_description:
-                        logger.info(f"Found NAICS description: '{naics_description}'")
                         search_terms.append(naics_description)
                 except Exception as e:
                     logger.error(f"Error fetching NAICS description for {naics_code}: {e}")
+            
+            # Fallback to PSC code description - REMOVED FOR NOW
+            # psc_code = str(opportunity.psc_code) if opportunity.psc_code is not None else None
+            # if psc_code:
+            #     try:
+            #         psc_description = self.psc_service.get_description(psc_code)
+            #         if psc_description:
+            #             search_terms.append(psc_description)
+            #     except Exception as e:
+            #         logger.error(f"Error fetching PSC description for {psc_code}: {e}")
 
             if not search_terms:
                 logger.warning(f"Could not determine a search term for opportunity {opportunity.id}. Skipping.")
                 continue
 
-            # Find the Facebook Page ID using the determined search term
             for term in search_terms:
                 page_id = None
                 try:
-                    logger.info(f"Searching Facebook for pages matching '{term}'...")
-                    # This is a synchronous call, so no 'await'.
                     page_id = self.facebook_service.find_page_by_name(term)
-                except Exception as e:
-                    logger.error(f"Error searching for Facebook page with term '{term}': {e}")
-                    continue # Try next search term
+                    if not page_id: continue
+                    
+                    page_info = self.facebook_service.get_page_info(page_id)
+                    business_name = page_info.get('name') if page_info else None
 
-                if not page_id:
-                    logger.warning(f"Could not find a Facebook page for '{term}' for opportunity {opportunity.id}.")
-                    continue
+                    if not business_name:
+                        logger.warning(f"Could not extract business name from page info for term '{term}'. Skipping.")
+                        continue
+
+                    with self.db_session_factory() as db:
+                        existing_lead = db.query(Lead).filter(
+                            Lead.opportunity_id == opportunity.id,
+                            Lead.business_name == business_name
+                        ).first()
+
+                        if existing_lead:
+                            logger.info(f"Lead already exists for opportunity {opportunity.id} and business '{business_name}'.")
+                            continue
+                    
+                    self.create_lead(opportunity.id, business_name, page_id)
+                    break # Move to next opportunity once a lead is created
                 
-                # Now get the page info using the ID
-                page_info = self.facebook_service.get_page_info(page_id)
-                if not page_info or 'name' not in page_info:
-                    logger.warning(f"Could not get page info for page ID '{page_id}'.")
+                except Exception as e:
+                    logger.error(f"Error processing search term '{term}' for opportunity {opportunity.id}: {e}")
                     continue
-
-                # Check if a lead for this opportunity and business already exists
-                existing_lead = self.db.query(Lead).filter(
-                    Lead.opportunity_id == opportunity.id,
-                    Lead.business_name == page_info['name']
-                ).first()
-
-                if existing_lead:
-                    logger.info(f"Lead already exists for opportunity {opportunity.id} and business '{page_info['name']}'.")
-                    continue
-
-                # Create a Lead record to track this outreach
-                new_lead = Lead(
-                    opportunity_id=opportunity.id,
-                    status="Discovered",
-                    facebook_page_url=f"https://www.facebook.com/{page_id}", # Construct URL from ID
-                    business_name=page_info.get('name'),
-                    facebook_page_id=page_id
-                )
-                self.db.add(new_lead)
-                self.db.commit()
-                logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {page_info.get('name')}.")
-                # We found a lead for this opportunity, so we can move to the next one
-                break
 
         logger.info("Finished processing opportunities.")
  

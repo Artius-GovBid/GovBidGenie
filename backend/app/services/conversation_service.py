@@ -1,6 +1,6 @@
 import logging
-from sqlalchemy.orm import Session
-from app.db.models import Lead, Opportunity
+from sqlalchemy.orm import sessionmaker, Session
+from app.db.models import Lead
 from app.services.facebook_service import FacebookService
 
 # Configure logging
@@ -11,16 +11,13 @@ class ConversationService:
     """
     Manages sending outreach messages to potential leads via Facebook.
     """
-    def __init__(self, db_session: Session):
-        self.db = db_session
-        self.facebook_service = FacebookService()
+    def __init__(self, db_session_factory: sessionmaker, facebook_service: FacebookService):
+        self.db_session_factory = db_session_factory
+        self.facebook_service = facebook_service
 
     def initiate_conversation(self, lead: Lead):
         """
         Sends a personalized outreach DM to the Facebook Page associated with a lead.
-
-        Args:
-            lead: The Lead object containing the opportunity and business info.
         """
         if not lead.opportunity:
             logger.error(f"Lead {lead.id} is missing associated opportunity data. Cannot initiate conversation.")
@@ -33,7 +30,6 @@ class ConversationService:
         logger.info(f"Initiating conversation for lead {lead.id} with page ID {lead.facebook_page_id}.")
 
         try:
-            # Construct a compelling, personalized message
             opportunity = lead.opportunity
             message = (
                 f"Hello {lead.business_name}, my name is Genie.\n\n"
@@ -43,26 +39,37 @@ class ConversationService:
                 "Would you be open to a brief chat about how we can help you win this contract?"
             )
 
-            # Use the Facebook service to send the message
             response = self.facebook_service.send_direct_message(
                 recipient_page_id=lead.facebook_page_id,
                 message=message
             )
-
-            if response and response.get('message_id'):
-                logger.info(f"Successfully sent message for lead {lead.id}. Message ID: {response['message_id']}")
-                # Update the lead's status to show we've made contact
-                # To update, we need to query for the lead object in this session
-                lead_to_update = self.db.query(Lead).filter(Lead.id == lead.id).first()
-                if lead_to_update:
-                    lead_to_update.status = "CONTACTED"
-                    self.db.commit()
-                    logger.info(f"Updated lead {lead.id} status to CONTACTED.")
-            else:
-                logger.error(f"Failed to send message for lead {lead.id}. Response: {response}")
-
+            return response
         except Exception as e:
             logger.error(f"An unexpected error occurred while initiating conversation for lead {lead.id}: {e}")
-            # Optionally, you could set the lead status to "CONTACT_FAILED"
-            # lead.status = "CONTACT_FAILED"
-            # self.db.commit()
+            return None
+
+    def process_discovered_leads(self):
+        """
+        Finds leads that have been discovered but not yet contacted and initiates
+        a conversation with them.
+        """
+        with self.db_session_factory() as db:
+            try:
+                leads_to_contact = db.query(Lead).filter(Lead.status == "Discovered").all()
+                if not leads_to_contact:
+                    logger.info("ConversationService: No new leads to contact.")
+                    return
+
+                logger.info(f"ConversationService: Found {len(leads_to_contact)} leads to contact.")
+                for lead in leads_to_contact:
+                    response = self.initiate_conversation(lead)
+                    if response and response.get('message_id'):
+                        logger.info(f"Successfully sent message for lead {lead.id}. Message ID: {response['message_id']}")
+                        lead.status = "CONTACTED"
+                    else:
+                        logger.error(f"Failed to send message for lead {lead.id}. Response: {response}")
+                        lead.status = "CONTACT_FAILED"
+                db.commit()
+            except Exception as e:
+                logger.error(f"An error occurred in process_discovered_leads: {e}")
+                db.rollback()

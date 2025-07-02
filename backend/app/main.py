@@ -1,77 +1,100 @@
-import os
+from fastapi import FastAPI
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Request, Response, Depends
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from typing import List, Dict, Any
-from starlette.middleware.cors import CORSMiddleware
+import logging
+import os
+from typing import Optional
 
-from app.db.models import Base, Opportunity, Lead
-from app.services.sam_service import SAMService
-from app.services.devops_service import DevOpsService
-from app.services.facebook_service import FacebookService
-from app.api.v1.router import api_router
-from app.core.config import settings
-from app.db.client import db_client
-from app.jobs.scheduler import scheduler
-
-# Load environment variables from .env file
+# Load environment variables from .env file FIRST
 load_dotenv()
 
-# --- Environment Variables ---
-DATABASE_URL = os.environ.get("DATABASE_URL")
-if not DATABASE_URL:
-    raise ValueError("DATABASE_URL environment variable is not set")
+from app.api.v1.router import api_router
+from app.jobs.scheduler import SchedulerService
+from app.db.client import SessionLocal
+from sqlalchemy.orm import Session
+from app.services.sam_service import SAMService
+from app.services.facebook_service import FacebookService
+from app.services.naics_service import NAICSService
+from app.services.psc_service import PSCService
+from app.services.lead_service import LeadService
+from app.services.conversation_service import ConversationService
+from app.services.devops_service import DevOpsService
 
-FACEBOOK_VERIFY_TOKEN = os.environ.get("FACEBOOK_VERIFY_TOKEN")
-if not FACEBOOK_VERIFY_TOKEN:
-    raise ValueError("FACEBOOK_VERIFY_TOKEN environment variable is not set.")
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-
-# --- Database Setup ---
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine)
-
+# --- App ---
 app = FastAPI(
-    title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    title="GovBidGenie API",
+    description="API for GovBidGenie, a service to generate leads from government contract opportunities.",
+    version="1.0.0"
 )
 
-# CORS Middleware
-# ... (rest of CORS middleware configuration)
-
-# --- Services ---
-sam_service = SAMService()
-devops_service = DevOpsService()
-facebook_service = FacebookService()
+# --- Global variables for services ---
+scheduler_service: Optional[SchedulerService] = None
 
 
 @app.on_event("startup")
-def startup_event():
-    db_client.connect()
-    # No need to check for Supabase, direct DB connection now
-    print("--- Database connection established. ---")
+async def startup_event():
+    global scheduler_service
+
+    logger.info("--- Starting up application ---")
+
+    db_session_factory = SessionLocal
     
-    # Start the background scheduler
+    # --- Service Initialization ---
+    facebook_page_id = os.environ.get("FACEBOOK_PAGE_ID")
+    facebook_access_token = os.environ.get("FACEBOOK_ACCESS_TOKEN")
+
+    facebook_service = FacebookService(
+        page_id=facebook_page_id, 
+        access_token=facebook_access_token
+    )
+    
+    sam_service = SAMService()
+    naics_service = NAICSService()
+    psc_service = PSCService()
+    devops_service = DevOpsService()
+    
+    lead_service = LeadService(
+        db_session_factory=db_session_factory,
+        facebook_service=facebook_service,
+        naics_service=naics_service
+    )
+    
+    conversation_service = ConversationService(
+        db_session_factory=db_session_factory,
+        facebook_service=facebook_service
+    )
+
+    # Initialize and start scheduler
+    scheduler_service = SchedulerService(
+        sam_service=sam_service,
+        lead_service=lead_service,
+        conversation_service=conversation_service,
+        devops_service=devops_service,
+        db_session_factory=db_session_factory
+    )
+    
+    scheduler = scheduler_service.get_scheduler()
     if not scheduler.running:
         scheduler.start()
-        print("--- Background scheduler started. ---")
+        logger.info("--- Background scheduler started. ---")
 
 
 @app.on_event("shutdown")
 def shutdown_event():
-    if scheduler.running:
-        scheduler.shutdown()
-        print("--- Background scheduler shut down. ---")
-    
-    db_client.disconnect()
+    logger.info("--- Shutting down application ---")
+    if scheduler_service:
+        scheduler = scheduler_service.get_scheduler()
+        if scheduler and scheduler.running:
+            scheduler.shutdown()
+            logger.info("--- Background scheduler stopped. ---")
+    logger.info("--- Application shutdown complete. ---")
 
+# --- API Router ---
+app.include_router(api_router, prefix="/api")
 
 @app.get("/")
 def read_root():
-    return {"message": "GovBidGenie Backend is running"}
-
-app.include_router(api_router, prefix=settings.API_V1_STR)
+    return {"message": "Welcome to GovBidGenie"}
