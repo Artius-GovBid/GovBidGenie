@@ -12,16 +12,25 @@ from app.db.models import Lead, ConversationLog, Learning, Appointment
 from app.services.conversation_service import ConversationService
 from app.services.facebook_service import FacebookService
 from app.services.sam_service import SAMService
+from app.services.lead_service import LeadService
 
 def fetch_sam_opportunities_job():
     """
-    Fetches new opportunities from SAM.gov and stores them in the database.
+    Fetches new opportunities from SAM.gov and stores them, then creates leads.
     """
     print("Scheduler: Running 'fetch_sam_opportunities_job'...")
     with SessionLocal() as db:
         try:
+            # Step 1: Fetch and store new opportunities
             sam_service = SAMService()
             sam_service.fetch_and_store_opportunities(db)
+            print("Scheduler: SAM.gov fetch completed.")
+
+            # Step 2: Process newly stored opportunities to create leads
+            lead_service = LeadService(db)
+            lead_service.process_new_opportunities()
+            print("Scheduler: Lead creation process from opportunities completed.")
+
             print("Scheduler: 'fetch_sam_opportunities_job' completed successfully.")
         except Exception as e:
             print(f"Scheduler: An error occurred during SAM fetch job: {e}")
