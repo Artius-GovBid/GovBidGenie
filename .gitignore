@@ -124,4 +124,7 @@ venv/
 
 # Env
 .env
-backend/.env 
+backend/.env
+
+# VS Code
+.vscode/

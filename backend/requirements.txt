@@ -1,9 +1,12 @@
 fastapi
 uvicorn[standard]
 sqlalchemy
+python-dotenv
 psycopg2-binary
 requests
-python-dotenv
-apscheduler
-watchfiles
 pydantic-settings
+watchfiles
+# --- Dependencies from merged remote branch ---
+supabase
+schedule
+openai

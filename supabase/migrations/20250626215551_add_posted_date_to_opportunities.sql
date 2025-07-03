@@ -1,0 +1,2 @@
+ALTER TABLE opportunities
+ADD COLUMN posted_date TIMESTAMP WITH TIME ZONE;

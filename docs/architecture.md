@@ -142,4 +142,4 @@ The entire management and monitoring of the lead funnel will occur within Azure 
 
 1. **Trigger**: A change occurs in the Supabase `leads` table.
 2. **Action**: A database trigger executes a Postgres function.
-3. **Logic**: The function will call an Edge Function which finds the corresponding Work Item in Azure DevOps (or creates one), updates its state (move it to the correct column), and posts the latest conversation log as a comment. 
+3. **Logic**: The function will call an Edge Function which finds the corresponding Work Item in Azure DevOps (or creates one), updates its state (move it to the correct column), and posts the latest conversation log as a comment.

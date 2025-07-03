@@ -78,4 +78,4 @@ The application uses a scheduler to periodically fetch data from SAM.gov. This w
 
 ## Project Status
 
-This project is currently in the architectural design phase. The backend and frontend structures have been defined, and development is beginning. 
+This project is currently in the architectural design phase. The backend and frontend structures have been defined, and development is beginning.

@@ -1,33 +1,30 @@
 import os
+from supabase import create_client, Client
+from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
+from typing import Optional
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Supabase connection
+url: Optional[str] = os.environ.get("SUPABASE_URL")
+key: Optional[str] = os.environ.get("SUPABASE_KEY")
 
+if not url or not key:
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in the environment.")
+
+supabase: Client = create_client(url, key)
+
+# SQLAlchemy connection for relationship handling
+# Note: Replace with your actual Supabase Postgres connection string
+DATABASE_URL: Optional[str] = os.environ.get("SUPABASE_DB_URL")
 if not DATABASE_URL:
-    raise ValueError("No DATABASE_URL set for the database client")
+    raise ValueError("SUPABASE_DB_URL must be set in the environment.")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# This client is for application-level lifecycle (startup/shutdown)
-class DBClient:
-    def connect(self):
-        print("Database connection pool established.")
-        # The engine connects lazily, so no explicit connect call is needed here.
-        pass
-
-    def disconnect(self):
-        print("Database connection pool closed.")
-        # Dispose of the connection pool
-        engine.dispose()
-
-db_client = DBClient()
-
-# This function is for dependency injection in API endpoints
 def get_db():
     db = SessionLocal()
     try:
