@@ -68,7 +68,6 @@ function Opportunities() {
                 <th>Title</th>
                 <th>Agency</th>
                 <th>Posted Date</th>
-                <th>Source</th>
                 <th>Action</th>
               </tr>
             </thead>
@@ -82,8 +81,7 @@ function Opportunities() {
                       </a>
                     </td>
                     <td>{opp.agency}</td>
-                    <td>{new Date(opp.posted_date).toLocaleDateString()}</td>
-                    <td>{opp.source}</td>
+                    <td>{opp.posted_date ? new Date(opp.posted_date).toLocaleDateString() : 'N/A'}</td>
                     <td>
                       <button onClick={() => handleCreateLead(opp.id)} className="button-primary">
                         Create Lead
@@ -93,7 +91,7 @@ function Opportunities() {
                 ))
               ) : (
                 <tr>
-                  <td colSpan="5">No new opportunities found.</td>
+                  <td colSpan="4">No new opportunities found.</td>
                 </tr>
               )}
             </tbody>

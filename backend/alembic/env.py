@@ -18,14 +18,13 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
 sys.path.insert(0, os.path.realpath(os.path.join(os.path.dirname(__file__), '..')))
 from app.db.models import Base
-import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Load .env file from the backend directory
+dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+load_dotenv(dotenv_path=dotenv_path)
 
 target_metadata = Base.metadata
 
@@ -66,11 +65,17 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    configuration = config.get_section(config.config_ini_section)
-    if configuration:
-        configuration['sqlalchemy.url'] = os.environ['DATABASE_URL']
+    # Use DATABASE_URL from environment for simplicity and consistency
+    db_url = os.getenv("DATABASE_URL")
+    if db_url is None:
+        raise ValueError("DATABASE_URL must be set in the environment.")
+
+    # Override the sqlalchemy.url from alembic.ini if it exists
+    # but prioritize the environment variable.
+    config.set_main_option('sqlalchemy.url', db_url)
+    
     connectable = engine_from_config(
-            configuration,
+        config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
@@ -80,21 +85,6 @@ def run_migrations_online() -> None:
             connection=connection, target_metadata=target_metadata
         )
 
-            with context.begin_transaction():
-                context.run_migrations()
-    else:
-        # Fallback for when the alembic section is not in the ini file
-        db_url = os.environ.get("DATABASE_URL")
-        if db_url is None:
-            raise ValueError("DATABASE_URL must be set in environment or alembic.ini")
-        
-        connectable = create_engine(db_url)
-
-        with connectable.connect() as connection:
-            context.configure(
-                connection=connection,
-                target_metadata=target_metadata
-            )
         with context.begin_transaction():
             context.run_migrations()
 
