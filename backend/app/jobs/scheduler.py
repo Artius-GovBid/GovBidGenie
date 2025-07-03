@@ -11,6 +11,21 @@ from app.db.client import SessionLocal
 from app.db.models import Lead, ConversationLog, Learning, Appointment
 from app.services.conversation_service import ConversationService
 from app.services.facebook_service import FacebookService
+from app.services.sam_service import SAMService
+
+def fetch_sam_opportunities_job():
+    """
+    Fetches new opportunities from SAM.gov and stores them in the database.
+    """
+    print("Scheduler: Running 'fetch_sam_opportunities_job'...")
+    with SessionLocal() as db:
+        try:
+            sam_service = SAMService()
+            sam_service.fetch_and_store_opportunities(db)
+            print("Scheduler: 'fetch_sam_opportunities_job' completed successfully.")
+        except Exception as e:
+            print(f"Scheduler: An error occurred during SAM fetch job: {e}")
+            db.rollback()
 
 def analyze_completed_conversations():
     """
@@ -135,6 +150,7 @@ def detect_no_shows_and_follow_up():
 if __name__ == "__main__":
     print("Starting background job scheduler...")
     # Schedule the jobs to run.
+    schedule.every().day.at("01:00").do(fetch_sam_opportunities_job)
     schedule.every(1).hour.do(analyze_completed_conversations)
     schedule.every(1).hour.do(detect_no_shows_and_follow_up)
     

@@ -8,7 +8,7 @@ class SAMService:
     Service to interact with the SAM.gov Opportunities API.
     """
     def __init__(self):
-        self.api_key = os.environ.get("SAM_API_KEY") # Placeholder for API key
+        self.api_key = os.environ.get("SAM_GOV_API_KEY") # Corrected environment variable name
         self.base_url = "https://api.sam.gov/prod/opportunities/v2/search"
 
     def fetch_opportunities(self, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
