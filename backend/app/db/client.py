@@ -1,10 +1,11 @@
 import os
-from supabase import create_client, Client
 from dotenv import load_dotenv
+from supabase import create_client, Client
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from typing import Optional
 
+# Load environment variables from .env file
 load_dotenv()
 
 # Supabase connection

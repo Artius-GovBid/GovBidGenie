@@ -128,41 +128,49 @@ def prospect_lead(lead_id: int, db: Session = Depends(get_db)):
     using keywords from the associated opportunity, and updates the lead's
     details and status to 'Prospected'.
     """
-    lead = db.query(Lead).filter(Lead.id == lead_id).first()
+    lead_query = db.query(Lead).filter(Lead.id == lead_id)
+    lead = lead_query.first()
+
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
     
     if lead.status != "Identified":
-        raise HTTPException(status_code=400, detail=f"Lead status is '{lead.status}', not 'Identified'.")
+        raise HTTPException(status_code=400, detail=f"Lead status is '{lead.status}', must be 'Identified'.")
 
     if not lead.opportunity:
-        raise HTTPException(status_code=400, detail="Lead has no associated opportunity.")
-    keywords = lead.opportunity.title.split()
+        raise HTTPException(status_code=404, detail=f"Associated opportunity not found for lead {lead_id}")
+
+    search_query = lead.opportunity.title
 
     facebook_service = FacebookService()
-    page_id = facebook_service.find_page_by_name(str(lead.business_name)) # Using existing method
+    page_id = facebook_service.find_page_by_name(search_query)
 
     if not page_id:
-        db.query(Lead).filter(Lead.id == lead_id).update({"status": "Prospecting Failed"})
+        lead_query.update({"status": "Prospecting Failed"})
         db.commit()
-        raise HTTPException(status_code=404, detail="No matching Facebook pages found.")
+        raise HTTPException(status_code=404, detail=f"No matching Facebook pages found for query: '{search_query}'")
 
     page_info = facebook_service.get_page_info(page_id)
-    if not page_info:
-        raise HTTPException(status_code=500, detail="Could not retrieve page info.")
+    if not page_info or 'name' not in page_info:
+        lead_query.update({"status": "Prospecting Failed"})
+        db.commit()
+        raise HTTPException(status_code=500, detail="Found a page but could not retrieve its information.")
 
+    # Update lead details using the update method
     update_data = {
-        "business_name": page_info.get("name"),
-        "facebook_page_url": f"https://www.facebook.com/{page_id}", # Construct URL
+        "business_name": page_info['name'],
+        "facebook_page_url": f"https://www.facebook.com/{page_id}",
         "status": "Prospected",
         "last_updated_at": datetime.utcnow()
     }
-    db.query(Lead).filter(Lead.id == lead_id).update(update_data)
+    lead_query.update(update_data)
     
     db.commit()
-    db.refresh(lead)
+    
+    # Fetch the updated lead to return it
+    updated_lead = db.query(Lead).filter(Lead.id == lead_id).first()
 
-    return { "message": "Lead successfully prospected.", "lead": lead }
+    return { "message": "Lead successfully prospected.", "lead": updated_lead }
 
 @router.post("/engage/{lead_id}", status_code=200, summary="Perform the engagement sequence for a prospected lead.")
 def engage_lead(lead_id: int, db: Session = Depends(get_db)):
