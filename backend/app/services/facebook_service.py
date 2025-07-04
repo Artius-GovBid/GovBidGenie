@@ -11,8 +11,15 @@ class FacebookService:
     def __init__(self):
         self.page_id = os.environ.get("FACEBOOK_PAGE_ID")
         self.access_token = os.environ.get("FACEBOOK_PAGE_ACCESS_TOKEN")
-        if not self.page_id or not self.access_token:
-            raise ValueError("FACEBOOK_PAGE_ID and FACEBOOK_PAGE_ACCESS_TOKEN environment variables must be set.")
+        self.app_id = os.environ.get("FACEBOOK_APP_ID")
+        self.app_secret = os.environ.get("FACEBOOK_APP_SECRET")
+        
+        if not self.page_id or not self.access_token or not self.app_id or not self.app_secret:
+            raise ValueError(
+                "All Facebook environment variables must be set: "
+                "FACEBOOK_PAGE_ID, FACEBOOK_PAGE_ACCESS_TOKEN, FACEBOOK_APP_ID, FACEBOOK_APP_SECRET"
+            )
+            
         self.base_url = f"https://graph.facebook.com/v20.0/{self.page_id}"
 
     def send_private_reply(self, comment_id: str, message: str) -> Dict[str, Any]:
@@ -129,15 +136,15 @@ class FacebookService:
         
         return response.json()
 
-    def find_page_by_name(self, page_name: str) -> Optional[str]:
+    def find_page_by_name(self, page_name: str) -> Optional[Dict[str, str]]:
         """
-        Searches for a Facebook Page by its name and returns the ID of the top result.
+        Searches for a Facebook Page by its name and returns the page object of the top result.
 
         Args:
             page_name: The name of the page to search for.
 
         Returns:
-            The Page ID as a string if a page is found, otherwise None.
+            A dictionary containing the page ID and name if a page is found, otherwise None.
         """
         endpoint = "https://graph.facebook.com/v20.0/pages/search"
         params = {
@@ -157,7 +164,7 @@ class FacebookService:
         if data:
             top_result = data[0]
             print(f"Found page '{top_result['name']}' with ID {top_result['id']} for search term '{page_name}'")
-            return top_result['id']
+            return top_result
         else:
             print(f"No Facebook Page found for search term '{page_name}'")
             return None

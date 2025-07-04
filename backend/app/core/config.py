@@ -18,6 +18,10 @@ class Settings(BaseSettings):
     # External API Keys
     OPENAI_API_KEY: Optional[str] = None
     SAM_API_KEY: Optional[str] = None
+    FACEBOOK_APP_ID: Optional[str] = None
+    FACEBOOK_APP_SECRET: Optional[str] = None
+    FACEBOOK_PAGE_ID: Optional[str] = None
+    FACEBOOK_PAGE_ACCESS_TOKEN: Optional[str] = None
 
     class Config:
         case_sensitive = True

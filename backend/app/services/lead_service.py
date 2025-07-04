@@ -106,21 +106,25 @@ class LeadService:
 
             # Find the Facebook Page ID using the determined search term
             logger.info(f"Searching Facebook for pages matching '{search_term}'...")
-            target_page_id = self.facebook_service.find_page_by_name(search_term)
+            target_page = self.facebook_service.find_page_by_name(search_term)
 
-            if not target_page_id:
+            if not target_page:
                 logger.warning(f"Could not find a Facebook page for '{search_term}' for opportunity {opportunity.id}. Skipping.")
                 continue
+
+            page_id = target_page['id']
+            page_name = target_page['name']
+            page_url = f"https://www.facebook.com/{page_id}"
 
             # Create a Lead record to track this outreach
             new_lead = Lead(
                 opportunity_id=opportunity.id,
-                status="Discovered",
-                facebook_page_url=target_page_id,
-                business_name=search_term
+                status="Prospected",
+                facebook_page_url=page_url,
+                business_name=page_name
             )
             self.db.add(new_lead)
             self.db.commit()
-            logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {target_page_id}.")
+            logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {page_id}.")
 
         logger.info("Finished processing opportunities.") 
