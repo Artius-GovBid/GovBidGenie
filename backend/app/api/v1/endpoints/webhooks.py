@@ -1,9 +1,12 @@
 import os
 import json
-from fastapi import APIRouter, Request, HTTPException, Response
+from fastapi import APIRouter, Request, HTTPException, Response, Depends
 from typing import Optional
+from sqlalchemy.orm import Session
 
 from app.services.facebook_service import FacebookService
+from app.services.lead_service import LeadService
+from app.db.client import get_db
 
 router = APIRouter()
 
@@ -34,7 +37,7 @@ async def verify_facebook_webhook(request: Request):
 
 
 @router.post("/facebook", summary="Handle Facebook Webhook Events")
-async def handle_facebook_webhook(request: Request):
+async def handle_facebook_webhook(request: Request, db: Session = Depends(get_db)):
     """
     Handles incoming events from the Facebook webhook, such as new comments.
     """
@@ -42,6 +45,28 @@ async def handle_facebook_webhook(request: Request):
     print("Received Facebook Webhook Event:")
     print(json.dumps(data, indent=2))
 
-    # TODO: Add logic to parse the event and trigger the Genie Matching Engine
-    
+    lead_service = LeadService(db)
+
+    # Process incoming webhook data
+    if data.get("object") == "page":
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                if change.get("field") == "feed" and change.get("value", {}).get("item") == "comment":
+                    comment_data = change.get("value")
+                    # We only care about new comments, not edits or deletes
+                    if comment_data.get("verb") != "add":
+                        continue
+                    
+                    user_id = comment_data.get("from", {}).get("id")
+                    comment_id = comment_data.get("comment_id")
+                    comment_text = comment_data.get("message")
+
+                    if user_id and comment_id and comment_text:
+                        print(f"Processing comment ID {comment_id} from user {user_id}")
+                        lead_service.process_comment(
+                            comment_text=comment_text,
+                            user_id=user_id,
+                            comment_id=comment_id
+                        )
+
     return {"status": "success"} 

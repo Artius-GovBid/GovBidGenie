@@ -1,7 +1,9 @@
 import os
 import requests
+import json
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
+from datetime import datetime, timedelta
 
 class SAMService:
     """
@@ -10,6 +12,7 @@ class SAMService:
     def __init__(self):
         self.api_key = os.environ.get("SAM_GOV_API_KEY") # Corrected environment variable name
         self.base_url = "https://api.sam.gov/prod/opportunities/v2/search"
+        self.headers = {'Accept': 'application/json'}
 
     def fetch_opportunities(self, params: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
         """
@@ -25,15 +28,20 @@ class SAMService:
         if params is None:
             params = {}
 
-        # The API key must be sent as a URL parameter.
+        # Add the API key to every request
         if self.api_key:
             params['api_key'] = self.api_key
         
-        headers = {'Accept': 'application/json'}
+        # If no date range is specified, default to the last 30 days
+        if 'postedFrom' not in params and 'postedTo' not in params:
+            today = datetime.now()
+            thirty_days_ago = today - timedelta(days=30)
+            params['postedTo'] = today.strftime('%Y-%m-%d')
+            params['postedFrom'] = thirty_days_ago.strftime('%Y-%m-%d')
 
         try:
             # Use a GET request with all parameters in the URL
-            response = requests.get(self.base_url, params=params, headers=headers)
+            response = requests.get(self.base_url, params=params, headers=self.headers)
             response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
 
             data = response.json()
@@ -54,12 +62,25 @@ class SAMService:
         """
         parsed_list = []
         for opp in opportunities:
+            posted_date_obj = None
+            posted_date_str = opp.get("postedDate")
+            if posted_date_str:
+                try:
+                    # The format seems to be 'YYYY-MM-DD'
+                    posted_date_obj = datetime.strptime(posted_date_str, '%Y-%m-%d')
+                except (ValueError, TypeError):
+                    # It might also include time information
+                    try:
+                        posted_date_obj = datetime.fromisoformat(posted_date_str.replace('Z', '+00:00'))
+                    except (ValueError, TypeError):
+                        print(f"Could not parse date: {posted_date_str}")
+
             parsed_opp = {
                 "sam_gov_id": opp.get("solicitationId"),
                 "title": opp.get("title"),
                 "url": opp.get("fullGovtResponseLink", [{}])[0].get("url") if opp.get("fullGovtResponseLink") else None,
                 "agency": opp.get("organizationHierarchy", {}).get("departmentName"),
-                "posted_date": opp.get("postedDate")
+                "posted_date": posted_date_obj
             }
             parsed_list.append(parsed_opp)
         return parsed_list

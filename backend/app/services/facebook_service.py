@@ -136,6 +136,25 @@ class FacebookService:
         
         return response.json()
 
+    def get_user_profile(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """
+        Fetches public profile information for a given User ID.
+        This may require specific permissions depending on what is being accessed.
+        """
+        endpoint = f"https://graph.facebook.com/v20.0/{user_id}"
+        params = {
+            'fields': 'id,name', # Basic fields are generally available
+            'access_token': self.access_token
+        }
+
+        response = requests.get(endpoint, params=params)
+
+        if not response.ok:
+            print(f"ERROR: Failed to get user profile for ID '{user_id}'. Status: {response.status_code}, Body: {response.text}")
+            return None
+        
+        return response.json()
+
     def find_page_by_name(self, page_name: str) -> Optional[Dict[str, str]]:
         """
         Searches for a Facebook Page by its name and returns the page object of the top result.

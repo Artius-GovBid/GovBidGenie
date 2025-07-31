@@ -4,6 +4,7 @@ from app.db.models import Opportunity, Lead
 from app.services.facebook_service import FacebookService
 from app.services.naics_service import NAICSService
 from app.services.psc_service import PSCService
+from app.services.sam_service import SAMService
 from datetime import datetime
 
 # Configure logging
@@ -16,6 +17,7 @@ class LeadService:
         self.facebook_service = FacebookService()
         self.naics_service = NAICSService()
         self.psc_service = PSCService()
+        self.sam_service = SAMService()
 
     def get_lead_by_sam_id(self, sam_gov_id: str) -> Lead | None:
         """
@@ -127,4 +129,89 @@ class LeadService:
             self.db.commit()
             logger.info(f"Successfully created lead for opportunity {opportunity.id} targeting page {page_id}.")
 
-        logger.info("Finished processing opportunities.") 
+        logger.info("Finished processing opportunities.")
+
+    def process_comment(self, comment_text: str, user_id: str, comment_id: str):
+        """
+        Processes a new comment, finds a relevant opportunity, creates a lead,
+        and sends a private reply.
+        """
+        logger.info(f"Processing comment from user {user_id}: '{comment_text}'")
+
+        # 1. Extract keywords from comment
+        stop_words = {'i', 'am', 'looking', 'for', 'a', 'an', 'the', 'in', 'on', 'of', 'and', 'is', 'are'}
+        keywords = [word.strip('.,!?;:') for word in comment_text.lower().split() if word.lower() not in stop_words]
+        search_query = " ".join(keywords)
+
+        if not search_query:
+            logger.info(f"No usable keywords found in comment: '{comment_text}'")
+            return
+
+        # 2. Find the best NAICS code for the keywords
+        logger.info(f"Finding NAICS code for keywords: '{search_query}'")
+        naics_code = self.naics_service.find_code_for_keywords(search_query)
+
+        if not naics_code:
+            logger.info(f"No NAICS code found for keywords: '{search_query}'")
+            return
+
+        logger.info(f"Found NAICS code {naics_code}. Searching SAM.gov for opportunities.")
+
+        # 3. Find a relevant opportunity on SAM.gov using the NAICS code
+        opportunities = self.sam_service.fetch_opportunities(params={'naics': naics_code, 'limit': 1})
+        if not opportunities:
+            logger.info(f"No opportunities found for NAICS code: '{naics_code}'")
+            return
+
+        opportunity_data = opportunities[0]
+        if not opportunity_data.get('sam_gov_id'):
+            logger.warning("Opportunity data is missing sam_gov_id. Skipping.")
+            return
+        
+        # 4. Check if an opportunity for this sam_gov_id already exists, or create it
+        opportunity = self.db.query(Opportunity).filter(Opportunity.sam_gov_id == opportunity_data['sam_gov_id']).first()
+        if not opportunity:
+            # Ensure posted_date is a datetime object if it exists
+            if 'posted_date' in opportunity_data and isinstance(opportunity_data['posted_date'], str):
+                try:
+                    opportunity_data['posted_date'] = datetime.fromisoformat(opportunity_data['posted_date'].replace('Z', '+00:00'))
+                except ValueError:
+                    opportunity_data['posted_date'] = None # or handle error appropriately
+
+            opportunity = Opportunity(**opportunity_data)
+            self.db.add(opportunity)
+            self.db.commit()
+            self.db.refresh(opportunity)
+            logger.info(f"Created new opportunity: {opportunity.title}")
+        
+        # 5. Get user's name from their profile
+        user_profile = self.facebook_service.get_user_profile(user_id)
+        user_name = user_profile.get('name', 'there') if user_profile else 'there'
+
+        # 6. Create the Lead
+        new_lead = Lead(
+            opportunity_id=opportunity.id,
+            status="ENGAGED", # User has engaged with us
+            business_name=user_name, # A good default
+        )
+        self.db.add(new_lead)
+        self.db.commit()
+        self.db.refresh(new_lead)
+        logger.info(f"Created new lead {new_lead.id} for user {user_name}")
+        
+        # 7. Send a private reply to the comment
+        message = (
+            f"Hi {user_name}, thanks for your comment! Based on what you said, "
+            f"I found a government contract opportunity you might be perfect for: '{opportunity.title}'. "
+            f"You can see the details here: {opportunity.url}. "
+            "Would you be interested in learning more?"
+        )
+        
+        try:
+            self.facebook_service.send_private_reply(comment_id, message)
+            logger.info(f"Successfully sent private reply to comment {comment_id}")
+            # Update lead status after successful message
+            new_lead.status = "MESSAGED"
+            self.db.commit()
+        except Exception as e:
+            logger.error(f"Failed to send private reply to comment {comment_id}: {e}") 
