@@ -1,0 +1,35 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+- task: UsePythonVersion@0
+  inputs:
+    versionSpec: '3.11'
+  displayName: 'Use Python 3.11'
+
+- script: |
+    python3 -m venv .venv
+    source .venv/bin/activate
+    pip install --upgrade pip
+    pip install -r backend/requirements.txt
+  displayName: 'Install dependencies'
+
+- script: |
+    source .venv/bin/activate
+    pip install bandit
+    bandit -r backend/app
+  displayName: 'Run SAST Scan with Bandit'
+
+- script: |
+    source .venv/bin/activate
+    pip install pip-audit
+    pip-audit
+  displayName: 'Run Dependency Scan with pip-audit'
+
+- script: |
+    source .venv/bin/activate
+    pytest
+  displayName: 'Run tests'
